@@ -1,5 +1,12 @@
+
+
+VERSION ?= 0.0.0-dev
+
+REGISTRY ?= quay.io/zncdatadev
+PROJECT_NAME = nifi-operator
+
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= $(REGISTRY)/$(PROJECT_NAME):$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -116,16 +123,14 @@ docker-push: ## Push docker image with the manager.
 # - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/arm64,linux/amd64
+BUILDX_METADATA_FILE ?= docker-digests.json	# The file to store the digests of the images built by buildx
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name nifi-operator-builder
 	$(CONTAINER_TOOL) buildx use nifi-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} --metadata-file ${BUILDX_METADATA_FILE} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm nifi-operator-builder
-	rm Dockerfile.cross
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -170,6 +175,8 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+HELM = $(LOCALBIN)/helm
+KIND = $(LOCALBIN)/kind
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
@@ -179,6 +186,8 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.0.2
+HELM_VERSION ?= v3.17.0
+KIND_VERSION ?= v0.26.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -223,3 +232,95 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
 endef
+
+HELM_DEPENDS ?= commons-operator listener-operator secret-operator zookeeper-operator
+TEST_NAMESPACE = kubedoop-operators
+
+.PHONY: helm-install-depends
+helm-install-depends: helm ## Install the helm chart depends.
+	$(HELM) repo add kubedoop https://zncdatadev.github.io/kubedoop-helm-charts/
+ifneq ($(strip $(HELM_DEPENDS)),)
+	for dep in $(HELM_DEPENDS); do \
+		$(HELM) upgrade --install --create-namespace --namespace $(TEST_NAMESPACE) --wait $$dep kubedoop/$$dep --version $(VERSION); \
+	done
+endif
+
+## helm uninstall depends
+.PHONY: helm-uninstall-depends
+helm-uninstall-depends: helm ## Uninstall the helm chart depends.
+ifneq ($(strip $(HELM_DEPENDS)),)
+	for dep in $(HELM_DEPENDS); do \
+		$(HELM) uninstall --namespace $(TEST_NAMESPACE) $$dep; \
+	done
+endif
+
+##@ Chainsaw-E2E
+
+# Tool Versions
+# KIND_K8S_VERSION refers to the version of k8s to be used by kind.
+# The version only effects e2e tests.
+# When run `make kind-create`, the version of k8s will be used to create the kind cluster,
+# and the target kubeconfig file will be named as `./kind-kubeconfig-$(KIND_K8S_VERSION)`.
+# So if you want to use the target cluster, to run `export KUBECONFIG=./kind-kubeconfig-$(KIND_K8S_VERSION)`.
+KIND_K8S_VERSION ?= 1.26.15
+CHAINSAW_VERSION ?= v0.2.12
+PRODUCT_VERSION ?= 2.0.0
+
+KIND_IMAGE ?= kindest/node:v${KIND_K8S_VERSION}
+KIND_KUBECONFIG ?= ./kind-kubeconfig-$(KIND_K8S_VERSION)
+KIND_CLUSTER_NAME ?= ${PROJECT_NAME}-$(KIND_K8S_VERSION)
+KIND_CONFIG ?= test/e2e/kind-config.yaml
+
+CHAINSAW = $(LOCALBIN)/chainsaw
+
+# Create a kind cluster
+.PHONY: kind-create
+kind-create: kind ## Create a kind cluster.
+	$(KIND) create cluster --config $(KIND_CONFIG) --image $(KIND_IMAGE) --name $(KIND_CLUSTER_NAME) --kubeconfig $(KIND_KUBECONFIG) --wait 120s
+
+.PHONY: kind-delete
+kind-delete: kind ## Delete a kind cluster.
+	$(KIND) delete cluster --name $(KIND_CLUSTER_NAME)
+
+# chainsaw
+
+# Use `grep 0.2.6 > /dev/null` instead of `grep -q 0.2.6`. It will not be able to determine the version number,
+# although the execution in the shell is normal, but in the makefile does fail to understand the mechanism in the makefile
+# The operation ends by using `touch` to change the time of the file so that its timestamp is further back than the directory,
+# so that no subsequent logic is performed after the `chainsaw` check is successful in relying on the `$(CHAINSAW)` target.
+.PHONY: chainsaw
+chainsaw: $(CHAINSAW) ## Download chainsaw locally if necessary.
+$(CHAINSAW): $(LOCALBIN)
+	@{ \
+	set -xe ;\
+	if test -x $(LOCALBIN)/chainsaw && ! $(LOCALBIN)/chainsaw version | grep $(CHAINSAW_VERSION:v%=%) > /dev/null; then \
+		echo "$(LOCALBIN)/chainsaw version is not expected $(CHAINSAW_VERSION). Removing it before installing."; \
+		rm -rf $(LOCALBIN)/chainsaw; \
+	fi; \
+	if test ! -s $(LOCALBIN)/chainsaw; then \
+		mkdir -p $(dir $(CHAINSAW)) ;\
+		TMP=$(shell mktemp -d) ;\
+		OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+		curl -sSL https://github.com/kyverno/chainsaw/releases/download/$(CHAINSAW_VERSION)/chainsaw_$${OS}_$${ARCH}.tar.gz | tar -xz -C $$TMP ;\
+		mv $$TMP/chainsaw $(CHAINSAW) ;\
+		rm -rf $$TMP ;\
+		chmod +x $(CHAINSAW) ;\
+		touch $(CHAINSAW) ;\
+	fi; \
+	}
+
+.PHONY: chainsaw-setup
+chainsaw-setup: ## Run the chainsaw setup
+	make docker-build
+	$(KIND) --name $(KIND_CLUSTER_NAME) load docker-image $(IMG)
+	KUBECONFIG=$(KIND_KUBECONFIG) make helm-install-depends
+	KUBECONFIG=$(KIND_KUBECONFIG) make deploy
+
+.PHONY: chainsaw-test
+chainsaw-test: chainsaw ## Run the chainsaw test
+	echo "product_version: $(PRODUCT_VERSION)" | KUBECONFIG=$(KIND_KUBECONFIG) $(CHAINSAW) test --cluster cluster-1=$(KIND_KUBECONFIG) --test-dir ./test/e2e/ --values -
+
+.PHONY: chainsaw-cleanup
+chainsaw-cleanup: ## Run the chainsaw cleanup
+	KUBECONFIG=$(KIND_KUBECONFIG) make helm-uninstall-depends
+	KUBECONFIG=$(KIND_KUBECONFIG) make undeploy
