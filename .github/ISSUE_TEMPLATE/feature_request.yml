@@ -1,0 +1,30 @@
+name: ⚡ Feature request
+title: "[Feature]: "
+description: Suggest a new idea!
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        First, check out our [Collaboration Guide](https://kubedoop.dev/docs/developer-manual/collaboration)
+        Please provide a searchable summary of the issue in the title above ⬆️.
+  - type: dropdown
+    attributes:
+      label: Have you searched existing issues?  🔎
+      description: Please search to see if an issue already exists for the issue you encountered.
+      options:
+        - no check
+        - I have searched and found no existing issues
+      default: 0
+  - type: textarea
+    attributes:
+      label: Summary 💡
+      description: Describe how it should work.
+  - type: textarea
+    attributes:
+      label: Examples 🌈
+      description: Provide a link to other implementations, or screenshots of the expected behavior.
+  - type: textarea
+    attributes:
+      label: Motivation 🔦
+      description: What are you trying to accomplish? How has the lack of this feature affected you? Providing context helps us come up with a solution that is more useful in the real world.

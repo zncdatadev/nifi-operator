@@ -25,3 +25,19 @@ go.work
 *.swp
 *.swo
 *~
+
+kind-kubeconfig*
+
+*-local.yaml
+*-local.*
+
+# test
+ginkgo.report
+cover.out
+*__debug*
+**/coverage
+
+# ai code local
+.codiumai.toml
+
+docker-digests.json
