@@ -13,5 +13,5 @@ spec:
     exec: 200s
   # skipDelete: true
   failFast: true
-  parallel: 1 # use 1 concurrent to test, to voide multiple csi driver conflict
+  parallel: 1
   forceTerminationGracePeriod: 10s
