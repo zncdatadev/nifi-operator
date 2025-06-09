@@ -19,13 +19,18 @@ package controller
 import (
 	"context"
 
+	operatorclient "github.com/zncdatadev/operator-go/pkg/client"
+	"github.com/zncdatadev/operator-go/pkg/reconciler"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
+	"github.com/zncdatadev/nifi-operator/internal/controller/cluster"
 )
+
+var logger = ctrl.Log.WithName("controller")
 
 // NifiClusterReconciler reconciles a NifiCluster object
 type NifiClusterReconciler struct {
@@ -36,14 +41,53 @@ type NifiClusterReconciler struct {
 // +kubebuilder:rbac:groups=nifi.kubedoop.dev,resources=nificlusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=nifi.kubedoop.dev,resources=nificlusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=nifi.kubedoop.dev,resources=nificlusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=authentication.kubedoop.dev,resources=authenticationclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 
 func (r *NifiClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	logger.Info("Reconciling NifiCluster", "name", req.Name, "namespace", req.Namespace)
+	// Fetch the NifiCluster instance
 
-	return ctrl.Result{}, nil
+	instance := &nifiv1alpha1.NifiCluster{}
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			logger.Info("NifiCluster resource not found, ignoring since object must be deleted")
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get NifiCluster")
+		return ctrl.Result{}, err
+	}
+
+	resourceClient := &operatorclient.Client{
+		Client:         r.Client,
+		OwnerReference: instance,
+	}
+
+	clientinfo := reconciler.ClusterInfo{
+		GVK: &metav1.GroupVersionKind{
+			Group:   nifiv1alpha1.GroupVersion.Group,
+			Version: nifiv1alpha1.GroupVersion.Version,
+			Kind:    "NifiCluster",
+		},
+		ClusterName: instance.Name,
+	}
+
+	reconciler := cluster.NewReconciler(resourceClient, clientinfo, &instance.Spec)
+
+	if err := reconciler.RegisterResources(ctx); err != nil {
+		logger.Error(err, "Failed to register resources for NifiCluster", "name", instance.Name)
+		return ctrl.Result{}, err
+	}
+
+	return reconciler.Run(ctx)
 }
 
 // SetupWithManager sets up the controller with the Manager.

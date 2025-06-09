@@ -17,15 +17,67 @@ limitations under the License.
 package v1alpha1
 
 import (
+	commonsv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/commons/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // NifiClusterSpec defines the desired state of NifiCluster.
 type NifiClusterSpec struct {
+	// +kubebuilder:validation:Required
+	ClusterConfig *ClusterConfigSpec `json:"clusterConfig"`
+
+	// +kubebuilder:validation:Optional
+	ClusterOperation *commonsv1alpha1.ClusterOperationSpec `json:"clusterOperation,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +default:value={"repo": "quay.io/zncdatadev", "pullPolicy": "IfNotPresent"}
+	Image *ImageSpec `json:"image,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Nodes *NodesSpec `json:"nodes"`
+}
+
+// NodesSpec defines the nodes spec.
+type NodesSpec struct {
+	RoleGroups map[string]RoleGroupSpec `json:"roleGroups,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	RoleConfig *commonsv1alpha1.RoleConfigSpec `json:"roleConfig,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	Config *ConfigSpec `json:"config,omitempty"`
+
+	*commonsv1alpha1.OverridesSpec `json:",inline"`
+
+	JVMArgumentOverrides *JVMArgumentOverridesSpec `json:"jvmArgumentOverrides,omitempty"`
+}
+
+// RoleGroupSpec defines the role group spec.
+type RoleGroupSpec struct {
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=1
+	Replicas *int32 `json:"replicas"`
+	// +kubebuilder:validation:Optional
+	// +default:value={"gracefulShutdownTimeout": "30s"}
+	Config                         *ConfigSpec `json:"config,omitempty"`
+	*commonsv1alpha1.OverridesSpec `json:",inline"`
+	JVMArgumentOverrides           *JVMArgumentOverridesSpec `json:"jvmArgumentOverrides,omitempty"`
+}
+
+// ConfigSpec defines the config spec.
+type ConfigSpec struct {
+	*commonsv1alpha1.RoleGroupConfigSpec `json:",inline"`
+}
+
+type JVMArgumentOverridesSpec struct {
+	Add         []string `json:"add,omitempty"`
+	Remove      []string `json:"remove,omitempty"`
+	RemoveRegex []string `json:"removeRegex,omitempty"`
 }
 
 // NifiClusterStatus defines the observed state of NifiCluster.
 type NifiClusterStatus struct {
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
