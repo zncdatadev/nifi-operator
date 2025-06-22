@@ -117,19 +117,19 @@ func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
 		<property name="Directory">{}</property>
 		<property name="Always Sync">false</property>
 		<property name="Partitions">16</property>
-		<property name="Checkpoint Interval">2</property>
+		<property name="Checkpoint Interval">2 mins</property>
 	</local-provider>
 
 	<cluster-provider>
 		<id>zk-provider</id>
 		<class>org.apache.nifi.controller.state.providers.zookeeper.ZooKeeperStateProvider</class>
-		<property name="Connect String">${env:ZOOKEEPER_HOSTS}</property>
-		<property name="Root Node">${env:ZOOKEEPER_CHROOT}</property>
+		<property name="Connect String">{{ getenv "ZOOKEEPER_HOSTS" }}</property>
+		<property name="Root Node">{{ getenv "ZOOKEEPER_CHROOT" }}</property>
 		<property name="Session Timeout">15 seconds</property>
 		<property name="Access Control">Open</property>
-	<cluster-provider>
+	</cluster-provider>
 </stateManagement>
-	`
+`
 
 	return util.IndentTab4Spaces(xml)
 }
@@ -288,7 +288,7 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	if enableTls {
 		// NODE_ADDRESS is constracted by shell script before start nifi,
 		// it is pod FQDN
-		properties.Add("nifi.web.https.host", "${env:NODE_ADDRESS}")
+		properties.Add("nifi.web.https.host", `{{ getenv "NODE_ADDRESS" }}`)
 		// nifi.web.https.poomitemptyrt
 		properties.Add("nifi.web.https.port", strconv.FormatInt(int64(getPort("https")), 10))
 		// nifi.web.https.network.interface.default
@@ -309,7 +309,7 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 		properties.Add("nifi.security.truststorePasswd", DefaultServerTlsStorePassword)
 	}
 	// nifi.web.http.host
-	properties.Add("nifi.web.http.host", "${env:NODE_ADDRESS}")
+	properties.Add("nifi.web.http.host", `{{ getenv "NODE_ADDRESS" }}`)
 	// nifi.web.http.port
 	properties.Add("nifi.web.http.port", strconv.FormatInt(int64(getPort("http")), 10))
 	// nifi.web.http.network.interface.default
@@ -353,13 +353,13 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	// nifi.cluster.is.node
 	properties.Add("nifi.cluster.is.node", "true")
 	// nifi.cluster.node.address
-	properties.Add("nifi.cluster.node.address", "${env:NODE_ADDRESS}")
+	properties.Add("nifi.cluster.node.address", `{{ getenv "NODE_ADDRESS" }}`)
 
 	// zookeeper properties
 	// nifi.zookeeper.connect.string
-	properties.Add("nifi.zookeeper.connect.string", "${env:ZOOKEEPER_HOSTS}")
+	properties.Add("nifi.zookeeper.connect.string", `{{ getenv "ZOOKEEPER_HOSTS" }}`)
 	// nifi.zookeeper.root.node
-	properties.Add("nifi.zookeeper.root.node", "${env:ZOOKEEPER_CHROOT}")
+	properties.Add("nifi.zookeeper.root.node", `{{ getenv "ZOOKEEPER_CHROOT" }}`)
 
 	if b.ClusterConfig.Authentication != nil {
 		auth, error := security.NewAuthentication(ctx, b.Client, b.ClusterName, b.ClusterConfig.Authentication)

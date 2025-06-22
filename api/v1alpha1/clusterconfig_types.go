@@ -19,8 +19,8 @@ type ClusterConfigSpec struct {
 	// Ref Pod spec.Volumes: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#podspecvolumes
 	ExtraVolumes *k8sruntime.RawExtension `json:"extraVolumes,omitempty"`
 
-	// +kubebuilder:validation:Optional
-	SensitiveProperties *SensitivePropertiesSpec `json:"sensitiveProperties,omitempty"`
+	// +kubebuilder:validation:Required
+	SensitiveProperties *SensitivePropertiesSpec `json:"sensitiveProperties"`
 
 	// +kubebuilder:validation:Optional
 	Tls *TlsSpec `json:"tls,omitempty"`
@@ -58,6 +58,7 @@ type CreateReportingTaskJobSpec struct {
 
 type SensitivePropertiesSpec struct {
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=nifiPbkdf2AesGcm256
 	// +kubebuilder:validation:Enum=nifiArgon2AesGcm128;nifiArgon2AesGcm256;nifiBcryptAesGcm128;nifiBcryptAesGcm256;nifiPbkdf2AesGcm128;nifiPbkdf2AesGcm256;nifiScryptAesGcm128;nifiScryptAesGcm256
 	Algorithm string `json:"algorithm,omitempty"`
 

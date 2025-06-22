@@ -85,7 +85,7 @@ func getIdentityProvider(providers ...string) string {
         <identifier>login-identity-provider</identifier>
         <class>org.apache.nifi.authentication.single.user.SingleUserLoginIdentityProvider</class>
         <property name="Username">`+username+`</property>
-        <property name="Password">${env:NIFI_ADMIN_PASSWORD}</property>
+        <property name="Password">{{ getenv "NIFI_ADMIN_PASSWORD" }}</property>
     </provider>
 `)
 	}

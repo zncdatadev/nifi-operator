@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"path"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
 	"github.com/zncdatadev/nifi-operator/internal/security"
@@ -12,6 +13,7 @@ import (
 	"github.com/zncdatadev/operator-go/pkg/reconciler"
 	"github.com/zncdatadev/operator-go/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	commonsv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/commons/v1alpha1"
@@ -63,6 +65,7 @@ func NewStatefulSetReconciler(
 			func(o *builder.Options) {
 				o.ClusterName = roleGroupInfo.GetClusterName()
 				o.RoleName = roleGroupInfo.GetRoleName()
+				o.RoleGroupName = roleGroupInfo.RoleGroupName
 				o.Labels = roleGroupInfo.GetLabels()
 				o.Annotations = roleGroupInfo.GetAnnotations()
 			},
@@ -88,11 +91,12 @@ func (b *StatefulSetBuilder) Build(ctx context.Context) (ctrlclient.Object, erro
 		return nil, fmt.Errorf("failed to get prepare container: %w", err)
 	}
 	b.AddInitContainer(prepareContainer.Build())
-	mainContainer, err := b.getMainContainer()
+	mainContainerBuilder, err := b.getMainContainerBuilder()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get main container: %w", err)
 	}
-	b.AddContainer(mainContainer.Build())
+	mainContainer := mainContainerBuilder.Build()
+	b.AddContainer(mainContainer)
 
 	volumes, err := b.getVolumes(ctx)
 	if err != nil {
@@ -138,24 +142,30 @@ func (b *StatefulSetBuilder) getPrepareContainer() (builder.ContainerBuilder, er
 }
 
 func (b *StatefulSetBuilder) getPrepareContainerArgs() (string, error) {
-	nodeAddress := fmt.Sprintf("$POD_NAME.%s.%s.svc.cluster.local", b.RoleGroupName, b.Client.GetOwnerNamespace())
+	nodeAddress := fmt.Sprintf("$POD_NAME.%s.%s.svc.cluster.local", b.Name, b.Client.GetOwnerNamespace())
 
 	args := `
-microdnf install -y gettext
+os=$(uname -s)
+arch=$(uname -m)
+arch=$(echo $arch | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 
-cp -r ` + constants.KubedoopConfigDirMount + ` ` + NifiConfigDir + `
+# use curl download gomplate from https://github.com/hairyhenderson/gomplate/releases/download/v4.3.2/gomplate_linux-amd64
+curl -L -o /usr/local/bin/gomplate https://github.com/hairyhenderson/gomplate/releases/download/v4.3.2/gomplate_$os-$arch
+chmod +x /usr/local/bin/gomplate
+
+cp ` + path.Join(constants.KubedoopConfigDirMount, "*") + ` ` + NifiConfigDir + `
 
 export NODE_ADDRESS="` + nodeAddress + `"
 
-envsubst < ` + constants.KubedoopConfigDirMount + `/nifi.properties > ` + NifiConfigDir + `/nifi.properties
-envsubst < ` + constants.KubedoopConfigDirMount + `/login-identity-providers.xml > ` + NifiConfigDir + `/login-identity-providers.xml
-envsubst < ` + constants.KubedoopConfigDirMount + `/state-management.xml > ` + NifiConfigDir + `/state-management.xml
+gomplate -f ` + constants.KubedoopConfigDirMount + `/nifi.properties -o ` + NifiConfigDir + `/nifi.properties
+gomplate -f ` + constants.KubedoopConfigDirMount + `/login-identity-providers.xml -o ` + NifiConfigDir + `/login-identity-providers.xml
+gomplate -f ` + constants.KubedoopConfigDirMount + `/state-management.xml -o ` + NifiConfigDir + `/state-management.xml
 `
 
 	return util.IndentTab4Spaces(args), nil
 }
 
-func (b *StatefulSetBuilder) getMainContainer() (builder.ContainerBuilder, error) {
+func (b *StatefulSetBuilder) getMainContainerBuilder() (builder.ContainerBuilder, error) {
 	container, err := b.getContainerTemplate(b.RoleName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get base container: %w", err)
@@ -167,7 +177,31 @@ func (b *StatefulSetBuilder) getMainContainer() (builder.ContainerBuilder, error
 	}
 	container.SetArgs([]string{args})
 	container.AddPorts(Ports)
+	container.SetLivenessProbe(&corev1.Probe{
+		FailureThreshold:    30,
+		InitialDelaySeconds: 10,
+		PeriodSeconds:       10,
+		SuccessThreshold:    1,
+		TimeoutSeconds:      3,
+		ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromString("https"),
+			},
+		},
+	})
 
+	container.SetStartupProbe(&corev1.Probe{
+		FailureThreshold:    120,
+		InitialDelaySeconds: 10,
+		PeriodSeconds:       10,
+		SuccessThreshold:    1,
+		TimeoutSeconds:      3,
+		ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromString("https"),
+			},
+		},
+	})
 	// TODO: set container resource
 	return container, nil
 }
@@ -206,6 +240,8 @@ wait_for_termination()
 rm -rf ` + builder.VectorShutdownFile + `
 
 prepare_signal_handlers
+
+sleep infinity
 
 bin/nifi.sh run &
 

@@ -93,6 +93,7 @@ spec:
                   sensitiveProperties:
                     properties:
                       algorithm:
+                        default: nifiPbkdf2AesGcm256
                         enum:
                         - nifiArgon2AesGcm128
                         - nifiArgon2AesGcm256
@@ -122,6 +123,7 @@ spec:
                   zookeeperConfigMapName:
                     type: string
                 required:
+                - sensitiveProperties
                 - zookeeperConfigMapName
                 type: object
               clusterOperation:
