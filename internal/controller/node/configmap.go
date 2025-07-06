@@ -37,7 +37,7 @@ func nifiRepository(name string) string {
 }
 
 var NifiRepositoryMouhtPath = map[string]string{
-	"database":   path.Join(constants.KubedoopDataDir, nifiRepository("database")),
+	"database":   path.Join(constants.KubedoopDataDir, nifiRepository("data")),
 	"flowfile":   path.Join(constants.KubedoopDataDir, nifiRepository("flowfile")),
 	"content":    path.Join(constants.KubedoopDataDir, nifiRepository("content")),
 	"provenance": path.Join(constants.KubedoopDataDir, nifiRepository("provenance")),
@@ -163,10 +163,6 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 
 	properties := properties.NewProperties()
 
-	// authz
-	properties.Add("nifi.authorizer.configuration.file", path.Join(NifiConfigDir, "authorizers.xml"))
-	properties.Add("nifi.login.identity.provider.configuration.file", path.Join(NifiConfigDir, "login-identity-providers.xml"))
-
 	properties.Add("nifi.templates.directory", path.Join(NifiConfigDir, "templates"))
 	// nifi.ui.banner.text
 	properties.Add("nifi.ui.banner.text", "Welcome to Nifi")
@@ -191,19 +187,25 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	// nifi.state.management.embedded.zookeeper.start
 	properties.Add("nifi.state.management.embedded.zookeeper.start", "false")
 
-	// flowfile repository
-	properties.Add("nifi.flow.configuration.file", NifiRepositoryMouhtPath["flowfile"])
-	properties.Add("nifi.flow.configuration.archive.enabled", "true")
-	properties.Add("nifi.flow.configuration.archive.dir", path.Join(NifiConfigDir, "archive"))
-	properties.Add("nifi.flow.configuration.archive.max.time", "")
-	properties.Add("nifi.flowcontroller.autoResumeState", "true")
-	properties.Add("nifi.flowcontroller.graceful.shutdown.period", "10 sec")
-
 	// database repository
 	// nifi.database.directory
 	properties.Add("nifi.database.directory", NifiRepositoryMouhtPath["database"])
 	// nifi.h2.url.append
 	properties.Add("nifi.h2.url.append", ";LOCK_TIMEOUT=25000;WRITE_DELAY=0;AUTO_SERVER=FALSE")
+
+	// flow configuration
+	properties.Add("nifi.flow.configuration.file", path.Join(NifiConfigDir, "flow.json.gz")) // in v2 use flow.json.gz
+	properties.Add("nifi.flow.configuration.archive.enabled", "true")
+	properties.Add("nifi.flow.configuration.archive.dir", path.Join(NifiConfigDir, "archive"))
+	properties.Add("nifi.flow.configuration.archive.max.time", "")
+	// TODO: add config.storage.flowfileRepo support
+	// properties.Add("nifi.flow.configuration.archive.max.storage", "")
+	properties.Add("nifi.flow.configuration.archive.max.count", "")
+	properties.Add("nifi.flowcontroller.autoResumeState", "true")
+	properties.Add("nifi.flowcontroller.graceful.shutdown.period", "10 sec")
+	properties.Add("nifi.flowservice.writedelay.interval", "500 ms")
+
+	// flowfile repository
 	// nifi.flowfile.repository.implementation
 	properties.Add("nifi.flowfile.repository.implementation", "org.apache.nifi.controller.repository.WriteAheadFlowFileRepository")
 	// nifi.flowfile.repository.wal.implementation
@@ -216,6 +218,7 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.flowfile.repository.always.sync", "false")
 	// nifi.flowfile.repository.retain.orphaned.flowfiles
 	properties.Add("nifi.flowfile.repository.retain.orphaned.flowfiles", "true")
+
 	// nifi.swap.manager.implementation
 	properties.Add("nifi.swap.manager.implementation", "org.apache.nifi.controller.FileSystemSwapManager")
 	// nifi.queue.swap.threshold
@@ -246,6 +249,9 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.provenance.repository.directory.default", NifiRepositoryMouhtPath["provenance"])
 	// nifi.provenance.repository.max.storage.time
 	properties.Add("nifi.provenance.repository.max.storage.time", "")
+	// TODO: add nifi.provenance.repository.max.storage.size support
+	// nifi.provenance.repository.max.storage.size
+	// properties.Add("nifi.provenance.repository.max.storage.size", "")
 	// nifi.provenance.repository.rollover.time
 	properties.Add("nifi.provenance.repository.rollover.time", "10 min")
 	// nifi.provenance.repository.rollover.size
@@ -332,7 +338,11 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 		properties.Add("nifi.sensitive.props.algorithm", b.ClusterConfig.SensitiveProperties.Algorithm)
 	}
 
-	// Authz
+	// security properties
+	// nifi.administrative.yield.duration
+	properties.Add("nifi.administrative.yield.duration", "30 sec")
+	properties.Add("nifi.authorizer.configuration.file", path.Join(NifiConfigDir, "authorizers.xml"))
+	properties.Add("nifi.login.identity.provider.configuration.file", path.Join(NifiConfigDir, "login-identity-providers.xml"))
 	// nifi.security.user.login.identity.provider
 	properties.Add("nifi.security.user.login.identity.provider", "login-identity-provider")
 	// nifi.security.user.authorizer

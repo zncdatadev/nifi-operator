@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"path"
 
 	"github.com/zncdatadev/operator-go/pkg/builder"
@@ -69,6 +70,11 @@ func (r *AdminSecretReconciler) Reconcile(ctx context.Context) (ctrl.Result, err
 
 	// if the secret already exists, we don't need to reconcile it
 	authLogger.Info("Admin secret already exists, skipping reconciliation", "namespace", ns, "name", name)
+
+	// check the admin password in the secret, if it is not, raise an error
+	if _, ok := secret.Data[NifiAdminUsername]; !ok {
+		return ctrl.Result{}, fmt.Errorf("admin secret %s/%s does not contain the admin username", ns, name)
+	}
 	return ctrl.Result{}, nil
 }
 

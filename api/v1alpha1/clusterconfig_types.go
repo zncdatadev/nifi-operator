@@ -57,14 +57,27 @@ type CreateReportingTaskJobSpec struct {
 }
 
 type SensitivePropertiesSpec struct {
+	// Only supported algorithms in v2:
+	// - NIFI_PBKDF2_AES_GCM_256
+	// - NIFI_ARGON2_AES_GCM_256
+	// We no longer support deprecated algorithms:
+	// - NIFI_BCRYPT_AES_GCM_128
+	// - NIFI_BCRYPT_AES_GCM_256
+	// - NIFI_PBKDF2_AES_GCM_128
+	// - NIFI_ARGON2_AES_GCM_128
+	// - NIFI_SCRYPT_AES_GCM_128
+	// - NIFI_SCRYPT_AES_GCM_256
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:default=nifiPbkdf2AesGcm256
-	// +kubebuilder:validation:Enum=nifiArgon2AesGcm128;nifiArgon2AesGcm256;nifiBcryptAesGcm128;nifiBcryptAesGcm256;nifiPbkdf2AesGcm128;nifiPbkdf2AesGcm256;nifiScryptAesGcm128;nifiScryptAesGcm256
+	// +kubebuilder:default=NIFI_ARGON2_AES_GCM_256
+	// +kubebuilder:validation:Enum=NIFI_PBKDF2_AES_GCM_256;NIFI_ARGON2_AES_GCM_256
 	Algorithm string `json:"algorithm,omitempty"`
 
 	// +kubebuilder:validation:Optional
 	AutoGenerate bool `json:"autoGenerate,omitempty"`
 
+	// A secret container a key `nifiSensitivePropsKey`.
+	// If `autoGenerate` is false and the secret is not found, the operator will fail to start.
+	// If `autoGenerate` is true, the operator will generate a new key and store it in the secret.
 	// +kubebuilder:validation:Required
 	KeySecret string `json:"keySecret"`
 }

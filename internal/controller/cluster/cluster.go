@@ -3,12 +3,14 @@ package cluster
 import (
 	"context"
 
+	"github.com/zncdatadev/operator-go/pkg/builder"
 	resourceClient "github.com/zncdatadev/operator-go/pkg/client"
 	"github.com/zncdatadev/operator-go/pkg/reconciler"
 	"github.com/zncdatadev/operator-go/pkg/util"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
 	"github.com/zncdatadev/nifi-operator/internal/controller/node"
+	"github.com/zncdatadev/nifi-operator/internal/security"
 	"github.com/zncdatadev/nifi-operator/internal/version"
 )
 
@@ -76,5 +78,24 @@ func (r *Reconciler) RegisterResources(ctx context.Context) error {
 
 	r.AddResource(node)
 
+	r.AddResource(r.sensitiveKeyReconciler())
 	return nil
+}
+
+func (r *Reconciler) sensitiveKeyReconciler() reconciler.Reconciler {
+
+	sensitiveConfig := r.ClusterConfig.SensitiveProperties
+
+	sensitiveKeyReconciler := security.NewSensitiveKeyReconciler(
+		r.Client,
+		sensitiveConfig.KeySecret,
+		sensitiveConfig.AutoGenerate,
+		func(o *builder.Options) {
+			o.ClusterName = r.ClusterInfo.GetClusterName()
+			o.Labels = r.ClusterInfo.GetLabels()
+			o.Annotations = r.ClusterInfo.GetAnnotations()
+		},
+	)
+
+	return sensitiveKeyReconciler
 }

@@ -141,7 +141,7 @@ func (r *Reconciler) RegisterResourceWithRoleGroup(
 
 	reconcilers = append(reconcilers, configmapReconciler, stsReconciler, serviceReconciler)
 
-	for key, _ := range auth.Authenticators {
+	for key := range auth.Authenticators {
 		if key == security.AuthenticatorTypeLDAP {
 			adminSecretReconciler := security.NewAdminSecretReconciler(
 				r.Client,
