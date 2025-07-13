@@ -83,6 +83,45 @@ spec:
                         type: object
                         x-kubernetes-preserve-unknown-fields: true
                     type: object
+                  customComponentsGitSync:
+                    default: []
+                    items:
+                      properties:
+                        branch:
+                          default: main
+                          type: string
+                        credentialsSecret:
+                          description: |-
+                            The secret that contains the git credentials.
+                            The secret must contain:
+                            - `GITSYNC_USERNAME`: The username for git authentication.
+                            - `GITSYNC_PASSWORD`: The password for git authentication.
+                          type: string
+                        depth:
+                          default: 1
+                          format: int32
+                          minimum: 0
+                          type: integer
+                        gitFolder:
+                          default: /
+                          type: string
+                        gitSyncConfig:
+                          additionalProperties:
+                            type: string
+                          default: {}
+                          type: object
+                        repo:
+                          type: string
+                        wait:
+                          default: 20s
+                          description: |-
+                            Synchronization interval for git sync.
+                            The value is a go duration string, such as "5s" or "2m".
+                          type: string
+                      required:
+                      - repo
+                      type: object
+                    type: array
                   extraVolumes:
                     default: {}
                     description: 'Ref Pod spec.Volumes: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#podspecvolumes'
@@ -130,10 +169,12 @@ spec:
                   vectorAggregatorConfigMapName:
                     type: string
                   zookeeperConfigMapName:
+                    description: |-
+                      If set, nifi clustering backend will use this Zookeeper config map.
+                      Else, nifi clustering backend will use kubernetes.
                     type: string
                 required:
                 - sensitiveProperties
-                - zookeeperConfigMapName
                 type: object
               clusterOperation:
                 description: ClusterOperationSpec defines the desired state of ClusterOperation

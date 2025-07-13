@@ -58,7 +58,7 @@ func (a *staticAuthenticator) GetEnvVars() []corev1.EnvVar {
 
 func (a *staticAuthenticator) GetArgs() string {
 	args := `
-export NIFI_ADMIN_PASSWORD=$(cat ` + getAdminPasswordMountDir() + `)
+export NIFI_ADMIN_PASSWORD="$(cat ` + getAdminPasswordMountDir() + ` | htpasswd -niB admin | cut -d: -f2s)"
 	`
 
 	return args

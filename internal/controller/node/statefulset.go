@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"path"
 
-	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
-	"github.com/zncdatadev/nifi-operator/internal/security"
 	"github.com/zncdatadev/operator-go/pkg/builder"
 	"github.com/zncdatadev/operator-go/pkg/client"
 	"github.com/zncdatadev/operator-go/pkg/constants"
@@ -16,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
+	"github.com/zncdatadev/nifi-operator/internal/common/security"
 	commonsv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/commons/v1alpha1"
 )
 
@@ -145,14 +145,6 @@ func (b *StatefulSetBuilder) getPrepareContainerArgs() (string, error) {
 	nodeAddress := fmt.Sprintf("$POD_NAME.%s.%s.svc.cluster.local", b.Name, b.Client.GetOwnerNamespace())
 
 	args := `
-os=$(uname -s)
-arch=$(uname -m)
-arch=$(echo $arch | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-
-# use curl download gomplate from https://github.com/hairyhenderson/gomplate/releases/download/v4.3.2/gomplate_linux-amd64
-curl -L -o /usr/local/bin/gomplate https://github.com/hairyhenderson/gomplate/releases/download/v4.3.2/gomplate_$os-$arch
-chmod +x /usr/local/bin/gomplate
-
 cp ` + path.Join(constants.KubedoopConfigDirMount, "*") + ` ` + NifiConfigDir + `
 
 export NODE_ADDRESS="` + nodeAddress + `"
@@ -254,7 +246,6 @@ mkdir -p ` + builder.VectorWatcherDir + ` && touch ` + builder.VectorShutdownFil
 }
 
 func (b *StatefulSetBuilder) getContainerEnv() ([]corev1.EnvVar, error) {
-
 	envVars := []corev1.EnvVar{
 		{
 			Name: "POD_NAME",
@@ -264,28 +255,31 @@ func (b *StatefulSetBuilder) getContainerEnv() ([]corev1.EnvVar, error) {
 				},
 			},
 		},
-		{
+	}
+
+	if b.ClusterConfig.ZookeeperConfigMapName != nil && *b.ClusterConfig.ZookeeperConfigMapName != "" {
+		envVars = append(envVars, corev1.EnvVar{
 			Name: "ZOOKEEPER_HOSTS",
 			ValueFrom: &corev1.EnvVarSource{
 				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
 					Key: "ZOOKEEPER_HOSTS",
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: b.ClusterConfig.ZookeeperConfigMapName,
+						Name: *b.ClusterConfig.ZookeeperConfigMapName,
 					},
 				},
 			},
-		},
-		{
+		})
+		envVars = append(envVars, corev1.EnvVar{
 			Name: "ZOOKEEPER_CHROOT",
 			ValueFrom: &corev1.EnvVarSource{
 				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
 					Key: "ZOOKEEPER_CHROOT",
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: b.ClusterConfig.ZookeeperConfigMapName,
+						Name: *b.ClusterConfig.ZookeeperConfigMapName,
 					},
 				},
 			},
-		},
+		})
 	}
 
 	if b.Authentication != nil {

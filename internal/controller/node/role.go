@@ -12,7 +12,7 @@ import (
 	"github.com/zncdatadev/operator-go/pkg/util"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
-	"github.com/zncdatadev/nifi-operator/internal/security"
+	"github.com/zncdatadev/nifi-operator/internal/common/security"
 )
 
 var _ reconciler.RoleReconciler = &Reconciler{}

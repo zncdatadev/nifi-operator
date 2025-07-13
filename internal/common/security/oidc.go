@@ -98,8 +98,8 @@ func (a *oidcAuthenticator) ExtendNifiProperties() *properties.Properties {
 	}
 
 	cfg.Add("nifi.security.user.oidc.discovery.url", issuer.String())
-	cfg.Add("nifi.security.user.oidc.client.id", "${{env:OIDC_CLIENT_ID}}")
-	cfg.Add("nifi.security.user.oidc.client.secret", "${{env:OIDC_CLIENT_SECRET}}")
+	cfg.Add("nifi.security.user.oidc.client.id", `{{ getenv "OIDC_CLIENT_ID" }}`)
+	cfg.Add("nifi.security.user.oidc.client.secret", `{{ getenv "OIDC_CLIENT_SECRET" }}`)
 	cfg.Add("nifi.security.user.oidc.extra.scopes", strings.Join(scopes, ","))
 	cfg.Add("nifi.security.user.oidc.claim.identifying.user", a.provider.PrincipalClaim)
 	// TODO: add oidc tls config
@@ -107,7 +107,7 @@ func (a *oidcAuthenticator) ExtendNifiProperties() *properties.Properties {
 }
 func (a *oidcAuthenticator) GetArgs() string {
 	args := `
-export NIFI_ADMIN_PASSWORD=$(cat ` + getAdminPasswordMountDir() + `)
+export NIFI_ADMIN_PASSWORD="$(cat ` + getAdminPasswordMountDir() + ` | htpasswd -niB admin | cut -d: -f2s)"
 	`
 
 	return args

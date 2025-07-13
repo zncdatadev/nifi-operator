@@ -17,7 +17,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
-	"github.com/zncdatadev/nifi-operator/internal/security"
+	"github.com/zncdatadev/nifi-operator/internal/common/security"
 )
 
 const (
@@ -358,18 +358,29 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	// nifi.cluster.flow.election.max.candidates
 	properties.Add("nifi.cluster.flow.election.max.candidates", "")
 
-	// TODO: add oidc config
-
 	// nifi.cluster.is.node
 	properties.Add("nifi.cluster.is.node", "true")
 	// nifi.cluster.node.address
 	properties.Add("nifi.cluster.node.address", `{{ getenv "NODE_ADDRESS" }}`)
 
-	// zookeeper properties
-	// nifi.zookeeper.connect.string
-	properties.Add("nifi.zookeeper.connect.string", `{{ getenv "ZOOKEEPER_HOSTS" }}`)
-	// nifi.zookeeper.root.node
-	properties.Add("nifi.zookeeper.root.node", `{{ getenv "ZOOKEEPER_CHROOT" }}`)
+	// nifi cluster mode
+	if b.ClusterConfig.ZookeeperConfigMapName == nil {
+		// If not set zookeeperConfigMapName, use kubernetes as clustering backend
+		// nifi.cluster.leader.election.implementation
+		properties.Add("nifi.cluster.leader.election.implementation", "KubernetesLeaderElectionManager")
+		// nifi.cluster.leader.election.kubernetes.lease.prefix
+		properties.Add("nifi.cluster.leader.election.kubernetes.lease.prefix", `{{ getenv "STACKLET_NAME" }}`)
+	} else if b.ClusterConfig.ZookeeperConfigMapName != nil && *b.ClusterConfig.ZookeeperConfigMapName != "" {
+		// nifi.cluster.leader.election.implementation
+		properties.Add("nifi.cluster.leader.election.implementation", "CuratorLeaderElectionManager")
+		// nifi.zookeeper.connect.string
+		properties.Add("nifi.zookeeper.connect.string", `{{ getenv "ZOOKEEPER_HOSTS" }}`)
+		// nifi.zookeeper.root.node
+		properties.Add("nifi.zookeeper.root.node", `{{ getenv "ZOOKEEPER_CHROOT" }}`)
+	} else {
+		// raise error if zookeeperConfigMapName is empty
+		return "", fmt.Errorf("zookeeperConfigMapName is required when clustering backend is zookeeper")
+	}
 
 	if b.ClusterConfig.Authentication != nil {
 		auth, error := security.NewAuthentication(ctx, b.Client, b.ClusterName, b.ClusterConfig.Authentication)
@@ -385,6 +396,14 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 			}
 		}
 	}
+
+	// Custom properties
+	properties.Add("nifi.python.command", "python3")
+	properties.Add("nifi.python.framework.source.directory", path.Join(NifiRoot, "python", "framework"))
+	properties.Add("nifi.python.framework.working.directory", path.Join(NifiRoot, "python", "working"))
+	properties.Add("nifi.python.extensions.source.directory.default", path.Join(NifiRoot, "python", "extensions"))
+
+	// TODO: implement custom components git sync
 
 	data, err := properties.Marshal()
 	if err != nil {

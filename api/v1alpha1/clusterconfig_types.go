@@ -13,7 +13,6 @@ type ClusterConfigSpec struct {
 	// +default:value={"enable": true}
 	CreateReportingTaskJob *CreateReportingTaskJobSpec `json:"createReportingTaskJob,omitempty"`
 
-	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Type=object
 	// +kubebuilder:default={}
 	// Ref Pod spec.Volumes: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#podspecvolumes
@@ -21,6 +20,10 @@ type ClusterConfigSpec struct {
 
 	// +kubebuilder:validation:Required
 	SensitiveProperties *SensitivePropertiesSpec `json:"sensitiveProperties"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default={}
+	CustomComponentsGitSync []GitSyncSpec `json:"customComponentsGitSync,omitempty"`
 
 	// +kubebuilder:validation:Optional
 	Tls *TlsSpec `json:"tls,omitempty"`
@@ -31,7 +34,45 @@ type ClusterConfigSpec struct {
 	// +kubebuilder:validation:Optional
 	VectorAggregatorConfigMapName string `json:"vectorAggregatorConfigMapName,omitempty"`
 
-	ZookeeperConfigMapName string `json:"zookeeperConfigMapName"`
+	// If set, nifi clustering backend will use this Zookeeper config map.
+	// Else, nifi clustering backend will use kubernetes.
+	// +kubebuilder:validation:Optional
+	ZookeeperConfigMapName *string `json:"zookeeperConfigMapName"`
+}
+
+type GitSyncSpec struct {
+	// +kubebuilder:validation:Required
+	Repo string `json:"repo"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default="main"
+	Branch string `json:"branch,omitempty"`
+
+	// The secret that contains the git credentials.
+	// The secret must contain:
+	// - `GITSYNC_USERNAME`: The username for git authentication.
+	// - `GITSYNC_PASSWORD`: The password for git authentication.
+	// +kubebuilder:validation:Optional
+	CredentialsSecret string `json:"credentialsSecret,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=0
+	Depth int32 `json:"depth,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default="/"
+	GitFolder string `json:"gitFolder,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default={}
+	GitSyncConfig map[string]string `json:"gitSyncConfig,omitempty"`
+
+	// Synchronization interval for git sync.
+	// The value is a go duration string, such as "5s" or "2m".
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default="20s"
+	Wait string `json:"wait,omitempty"`
 }
 
 // AuthenticationSpec defines the authentication spec.
