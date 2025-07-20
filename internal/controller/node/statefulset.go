@@ -98,7 +98,7 @@ func (b *StatefulSetBuilder) Build(ctx context.Context) (ctrlclient.Object, erro
 	mainContainer := mainContainerBuilder.Build()
 	b.AddContainer(mainContainer)
 
-	volumes, err := b.getVolumes(ctx)
+	volumes, err := b.getVolumes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get volumes: %w", err)
 	}
@@ -144,10 +144,16 @@ func (b *StatefulSetBuilder) getPrepareContainer() (builder.ContainerBuilder, er
 func (b *StatefulSetBuilder) getPrepareContainerArgs() (string, error) {
 	nodeAddress := fmt.Sprintf("$POD_NAME.%s.%s.svc.cluster.local", b.Name, b.Client.GetOwnerNamespace())
 
+	authArgs := ""
+	if b.Authentication != nil {
+		authArgs = b.Authentication.GetInitArgs()
+	}
+
 	args := `
 cp ` + path.Join(constants.KubedoopConfigDirMount, "*") + ` ` + NifiConfigDir + `
 
 export NODE_ADDRESS="` + nodeAddress + `"
+` + authArgs + `
 
 gomplate -f ` + constants.KubedoopConfigDirMount + `/nifi.properties -o ` + NifiConfigDir + `/nifi.properties
 gomplate -f ` + constants.KubedoopConfigDirMount + `/login-identity-providers.xml -o ` + NifiConfigDir + `/login-identity-providers.xml
@@ -199,37 +205,9 @@ func (b *StatefulSetBuilder) getMainContainerBuilder() (builder.ContainerBuilder
 }
 
 func (b *StatefulSetBuilder) getMainContainerArgs() (string, error) {
-	args := `
-prepare_signal_handlers()
-{
-    unset term_child_pid
-    unset term_kill_needed
-    trap 'handle_term_signal' TERM
-}
+	args := util.CommonBashTrapFunctions + `
 
-handle_term_signal()
-{
-    if [ "${term_child_pid}" ]; then
-        kill -TERM "${term_child_pid}" 2>/dev/null
-    else
-        term_kill_needed="yes"
-    fi
-}
-
-wait_for_termination()
-{
-    set +e
-    term_child_pid=$1
-    if [[ -v term_kill_needed ]]; then
-        kill -TERM "${term_child_pid}" 2>/dev/null
-    fi
-    wait ${term_child_pid} 2>/dev/null
-    trap - TERM
-    wait ${term_child_pid} 2>/dev/null
-    set -e
-}
-
-rm -rf ` + builder.VectorShutdownFile + `
+` + util.RemoveVectorShutdownFileCommand() + `
 
 prepare_signal_handlers
 
@@ -239,7 +217,7 @@ bin/nifi.sh run &
 
 wait_for_termination $!
 
-mkdir -p ` + builder.VectorWatcherDir + ` && touch ` + builder.VectorShutdownFile + `
+` + util.CreateVectorShutdownFileCommand() + `
 `
 
 	return util.IndentTab4Spaces(args), nil
@@ -311,7 +289,7 @@ func (b *StatefulSetBuilder) getVolumeMounts() ([]corev1.VolumeMount, error) {
 	return volumeMounts, nil
 }
 
-func (b *StatefulSetBuilder) getVolumes(ctx context.Context) ([]corev1.Volume, error) {
+func (b *StatefulSetBuilder) getVolumes() ([]corev1.Volume, error) {
 	volumes := []corev1.Volume{
 		{
 			Name: NifiConfigVolumeName,

@@ -56,44 +56,40 @@ func (a *staticAuthenticator) GetEnvVars() []corev1.EnvVar {
 	return nil
 }
 
-func (a *staticAuthenticator) GetArgs() string {
+func (a *staticAuthenticator) GetInitArgs() string {
 	args := `
-export NIFI_ADMIN_PASSWORD="$(cat ` + getAdminPasswordMountDir() + ` | htpasswd -niB admin | cut -d: -f2s)"
+export NIFI_ADMIN_PASSWORD="$(python3 -c 'import bcrypt; print(bcrypt.hashpw(open("` + getAdminPasswordMountDir() + `", "rb").read().strip(), bcrypt.gensalt()).decode("utf-8"), end="")')"
 	`
 
 	return args
 }
 
 func (a *staticAuthenticator) GetLoginIdentiryProvider() string {
-	return getIdentityProvider()
+	return getSingleUserLoginIdentityProvider()
 }
 
-func getIdentityProvider(providers ...string) string {
+func getIdentityProvider(provider ...string) string {
 	header := `
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<loginIdentityProviders>
-
+<loginIdentityProviders>`
+	foot := `</loginIdentityProviders>
 `
-	foot := `
-</loginIdentityProviders>
-`
-
-	var providerSnippets []string
-	for _, username := range providers {
-		providerSnippets = append(providerSnippets, `
-    <provider>
-        <identifier>login-identity-provider</identifier>
-        <class>org.apache.nifi.authentication.single.user.SingleUserLoginIdentityProvider</class>
-        <property name="Username">`+username+`</property>
-        <property name="Password">{{ getenv "NIFI_ADMIN_PASSWORD" }}</property>
-    </provider>
-`)
-	}
 
 	snippet := []string{
 		header,
-		strings.Join(providerSnippets, "\n"),
+		strings.Join(provider, "\n"),
 		foot,
 	}
 	return util.IndentTab4Spaces(strings.Join(snippet, "\n"))
+}
+
+func getSingleUserLoginIdentityProvider() string {
+	provider := `
+	<provider>
+		<identifier>login-identity-provider</identifier>
+		<class>org.apache.nifi.authentication.single.user.SingleUserLoginIdentityProvider</class>
+		<property name="Username">admin</property>
+		<property name="Password">{{ getenv "NIFI_ADMIN_PASSWORD" }}</property>
+	</provider>`
+	return getIdentityProvider(provider)
 }

@@ -6,7 +6,7 @@ import (
 
 const (
 	DefaultRepository     = "quay.io/zncdatadev"
-	DefaultProductVersion = "2.0.0"
+	DefaultProductVersion = "2.4.0"
 	DefaultProductName    = "nifi"
 )
 

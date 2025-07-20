@@ -80,7 +80,7 @@ func (a *ldapAuthenticator) GetEnvVars() []corev1.EnvVar {
 	return nil
 }
 
-func (a *ldapAuthenticator) GetArgs() string {
+func (a *ldapAuthenticator) GetInitArgs() string {
 	return ""
 }
 

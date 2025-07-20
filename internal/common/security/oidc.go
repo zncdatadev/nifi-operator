@@ -105,16 +105,16 @@ func (a *oidcAuthenticator) ExtendNifiProperties() *properties.Properties {
 	// TODO: add oidc tls config
 	return cfg
 }
-func (a *oidcAuthenticator) GetArgs() string {
+func (a *oidcAuthenticator) GetInitArgs() string {
 	args := `
-export NIFI_ADMIN_PASSWORD="$(cat ` + getAdminPasswordMountDir() + ` | htpasswd -niB admin | cut -d: -f2s)"
+export NIFI_ADMIN_PASSWORD="$(python3 -c 'import bcrypt; print(bcrypt.hashpw(open("` + getAdminPasswordMountDir() + `", "rb").read().strip(), bcrypt.gensalt()).decode("utf-8"), end="")')"
 	`
 
 	return args
 }
 
 func (a *oidcAuthenticator) GetLoginIdentiryProvider() string {
-	return getIdentityProvider()
+	return getSingleUserLoginIdentityProvider()
 }
 
 func getAdminPasswordMountDir() string {

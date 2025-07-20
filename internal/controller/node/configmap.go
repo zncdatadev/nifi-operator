@@ -226,7 +226,7 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 
 	// content repository
 	// nifi.content.repository.implementation
-	properties.Add("nifi.content.repository.implementation", "org.apache.nifi.content.repository.FileSystemRepository")
+	properties.Add("nifi.content.repository.implementation", "org.apache.nifi.controller.repository.FileSystemRepository")
 	// nifi.content.claim.max.appendable.size
 	properties.Add("nifi.content.claim.max.appendable.size", "1 MB")
 	// nifi.content.repository.directory.default
@@ -349,8 +349,13 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.security.user.authorizer", "authorizer")
 	// nifi.security.allow.anonymous.authentication
 	properties.Add("nifi.security.allow.anonymous.authentication", "false")
-	// nifi.cluster.protocol.is.secure
-	properties.Add("nifi.cluster.protocol.is.secure", "true")
+	if enableTls {
+		// nifi.cluster.protocol.is.secure
+		properties.Add("nifi.cluster.protocol.is.secure", "true")
+	} else {
+		// nifi.cluster.protocol.is.secure
+		properties.Add("nifi.cluster.protocol.is.secure", "false")
+	}
 	// nifi.cluster.node.protocol.port
 	properties.Add("nifi.cluster.node.protocol.port", strconv.FormatInt(int64(getPort("protocol")), 10))
 	// nifi.cluster.flow.election.max.wait.time
@@ -397,11 +402,12 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 		}
 	}
 
+	// TODO: implement custom properties when nifi image support python env
 	// Custom properties
-	properties.Add("nifi.python.command", "python3")
-	properties.Add("nifi.python.framework.source.directory", path.Join(NifiRoot, "python", "framework"))
-	properties.Add("nifi.python.framework.working.directory", path.Join(NifiRoot, "python", "working"))
-	properties.Add("nifi.python.extensions.source.directory.default", path.Join(NifiRoot, "python", "extensions"))
+	// properties.Add("nifi.python.command", "python3")
+	// properties.Add("nifi.python.framework.source.directory", path.Join(NifiRoot, "python", "framework"))
+	// properties.Add("nifi.python.framework.working.directory", path.Join(NifiRoot, "python", "working"))
+	// properties.Add("nifi.python.extensions.source.directory.default", path.Join(NifiRoot, "python", "extensions"))
 
 	// TODO: implement custom components git sync
 

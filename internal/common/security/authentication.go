@@ -92,6 +92,15 @@ func NewAuthentication(
 	}, nil
 }
 
+func (a *Authentication) GetInitArgs() string {
+	for _, typedAuthenticator := range a.Authenticators {
+		if len(typedAuthenticator) == 1 {
+			return typedAuthenticator[0].GetInitArgs()
+		}
+	}
+	return ""
+}
+
 func (a *Authentication) GetEnvVars() []corev1.EnvVar {
 	for _, typedAuthenticator := range a.Authenticators {
 		if len(typedAuthenticator) == 1 {
@@ -143,5 +152,5 @@ type Authenticator interface {
 	GetVolumeMounts() []corev1.VolumeMount
 	ExtendNifiProperties() *properties.Properties
 	GetLoginIdentiryProvider() string
-	GetArgs() string
+	GetInitArgs() string
 }
