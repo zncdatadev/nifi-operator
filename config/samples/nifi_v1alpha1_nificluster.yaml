@@ -1,0 +1,9 @@
+apiVersion: nifi.kubedoop.dev/v1alpha1
+kind: NifiCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: nifi-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: nificluster-sample
+spec:
+  # TODO(user): Add fields here

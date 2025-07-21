@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- nifi_v1alpha1_nificluster.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
