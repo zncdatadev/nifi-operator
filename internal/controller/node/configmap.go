@@ -42,6 +42,7 @@ var NifiRepositoryMouhtPath = map[string]string{
 	"content":    path.Join(constants.KubedoopDataDir, nifiRepository("content")),
 	"provenance": path.Join(constants.KubedoopDataDir, nifiRepository("provenance")),
 	"state":      path.Join(constants.KubedoopDataDir, nifiRepository("state")),
+	"status":     path.Join(constants.KubedoopDataDir, nifiRepository("status")),
 	"server-tls": path.Join(constants.KubedoopDataDir, nifiRepository("server_tls")),
 }
 
@@ -114,7 +115,7 @@ func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
 	<local-provider>
 		<id>local-provider</id>
 		<class>org.apache.nifi.controller.state.providers.local.WriteAheadLocalStateProvider</class>
-		<property name="Directory">{}</property>
+		<property name="Directory">` + NifiRepositoryMouhtPath["state"] + `</property>
 		<property name="Always Sync">false</property>
 		<property name="Partitions">16</property>
 		<property name="Checkpoint Interval">2 mins</property>
@@ -282,12 +283,13 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.components.status.repository.buffer.size", "14400")
 	// nifi.components.status.snapshot.frequency
 	properties.Add("nifi.components.status.snapshot.frequency", "1 min")
+
 	// nifi.status.repository.questdb.persist.node.days
 	properties.Add("nifi.status.repository.questdb.persist.node.days", "14")
 	// nifi.status.repository.questdb.persist.component.days
 	properties.Add("nifi.status.repository.questdb.persist.component.days", "3")
 	// nifi.status.repository.questdb.persist.location
-	properties.Add("nifi.status.repository.questdb.persist.location", NifiRepositoryMouhtPath["state"])
+	properties.Add("nifi.status.repository.questdb.persist.location", NifiRepositoryMouhtPath["status"])
 
 	// web properties
 	// nifi.web.https.hos
@@ -331,7 +333,7 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.web.proxy.context.path", "")
 
 	// nifi.sensitive.props.key
-	properties.Add("nifi.sensitive.props.key", fmt.Sprintf("${file:UTF-8:%s}", path.Join(NifiSensitivePropertyDir, "nifiSensitivePropsKey")))
+	properties.Add("nifi.sensitive.props.key", fmt.Sprintf("${file:UTF-8:%s}", path.Join(constants.KubedoopRoot, "sensitiveproperty", "nifiSensitivePropsKey")))
 	// nifi.sensitive.props.key.protected
 	properties.Add("nifi.sensitive.props.key.protected", "")
 	if b.ClusterConfig.SensitiveProperties != nil && b.ClusterConfig.SensitiveProperties.Algorithm != "" {

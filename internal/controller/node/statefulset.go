@@ -175,6 +175,18 @@ func (b *StatefulSetBuilder) getMainContainerBuilder() (builder.ContainerBuilder
 	}
 	container.SetArgs([]string{args})
 	container.AddPorts(Ports)
+	b.setupMainContainerProbe(container)
+
+	return container, nil
+}
+
+func (b *StatefulSetBuilder) setupMainContainerProbe(container builder.ContainerBuilder) {
+	port := intstr.FromString("http")
+
+	if b.ClusterConfig.Tls != nil {
+		port = intstr.FromString("https")
+	}
+
 	container.SetLivenessProbe(&corev1.Probe{
 		FailureThreshold:    30,
 		InitialDelaySeconds: 10,
@@ -183,7 +195,7 @@ func (b *StatefulSetBuilder) getMainContainerBuilder() (builder.ContainerBuilder
 		TimeoutSeconds:      3,
 		ProbeHandler: corev1.ProbeHandler{
 			TCPSocket: &corev1.TCPSocketAction{
-				Port: intstr.FromString("https"),
+				Port: port,
 			},
 		},
 	})
@@ -196,12 +208,10 @@ func (b *StatefulSetBuilder) getMainContainerBuilder() (builder.ContainerBuilder
 		TimeoutSeconds:      3,
 		ProbeHandler: corev1.ProbeHandler{
 			TCPSocket: &corev1.TCPSocketAction{
-				Port: intstr.FromString("https"),
+				Port: port,
 			},
 		},
 	})
-	// TODO: set container resource
-	return container, nil
 }
 
 func (b *StatefulSetBuilder) getMainContainerArgs() (string, error) {
@@ -211,7 +221,7 @@ func (b *StatefulSetBuilder) getMainContainerArgs() (string, error) {
 
 prepare_signal_handlers
 
-sleep infinity
+# sleep infinity
 
 bin/nifi.sh run &
 

@@ -69,8 +69,9 @@ func (a *staticAuthenticator) GetLoginIdentiryProvider() string {
 }
 
 func getIdentityProvider(provider ...string) string {
-	header := `
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+	// Note: The file `login-identity-providers.xml` first line must be `<?xml version="1.0" encoding="UTF-8" standalone="no"?>`
+	// otherwise, it will cause an error when NiFi starts.
+	header := `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <loginIdentityProviders>`
 	foot := `</loginIdentityProviders>
 `

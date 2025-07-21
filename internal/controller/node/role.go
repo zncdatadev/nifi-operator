@@ -125,12 +125,13 @@ func (r *Reconciler) RegisterResourceWithRoleGroup(
 		return nil, err
 	}
 
-	serviceReconciler := reconciler.NewServiceReconciler(
+	serviceReconciler := NewServiceReconciler(
 		r.Client,
 		info.GetFullName(),
 		Ports,
 		func(o *builder.ServiceBuilderOptions) {
 			o.ListenerClass = constants.ExternalUnstable
+			o.Headless = true
 			o.ClusterName = info.GetClusterName()
 			o.RoleName = info.GetRoleName()
 			o.RoleGroupName = info.GetGroupName()
