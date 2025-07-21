@@ -86,62 +86,44 @@ func NewStatefulSetReconciler(
 
 func (b *StatefulSetBuilder) Build(ctx context.Context) (ctrlclient.Object, error) {
 
-	prepareContainer, err := b.getPrepareContainer()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get prepare container: %w", err)
-	}
+	prepareContainer := b.getPrepareContainer()
+
 	b.AddInitContainer(prepareContainer.Build())
-	mainContainerBuilder, err := b.getMainContainerBuilder()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get main container: %w", err)
-	}
+	mainContainerBuilder := b.getMainContainerBuilder()
+
 	mainContainer := mainContainerBuilder.Build()
 	b.AddContainer(mainContainer)
 
-	volumes, err := b.getVolumes()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get volumes: %w", err)
-	}
+	volumes := b.getVolumes()
 	b.AddVolumes(volumes)
 
 	return b.StatefulSet.Build(ctx)
 }
 
-func (b *StatefulSetBuilder) getContainerTemplate(name string) (builder.ContainerBuilder, error) {
+func (b *StatefulSetBuilder) getContainerTemplate(name string) builder.ContainerBuilder {
 	container := builder.NewContainerBuilder(name, b.Image)
 	container.SetSecurityContext(0, 0, false)
 	container.SetCommand([]string{"/bin/bash", "-x", "-euo", "pipefail", "-c"})
 
-	envVars, err := b.getContainerEnv()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get container environment variables: %w", err)
-	}
+	envVars := b.getContainerEnv()
+
 	container.AddEnvVars(envVars)
-	volumeMounts, err := b.getVolumeMounts()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get volume mounts: %w", err)
-	}
+	volumeMounts := b.getVolumeMounts()
 	container.AddVolumeMounts(volumeMounts)
-	return container, nil
+	return container
 }
 
-func (b *StatefulSetBuilder) getPrepareContainer() (builder.ContainerBuilder, error) {
-	container, err := b.getContainerTemplate("prepare")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get base container: %w", err)
-	}
+func (b *StatefulSetBuilder) getPrepareContainer() builder.ContainerBuilder {
+	container := b.getContainerTemplate("prepare")
 
-	args, err := b.getPrepareContainerArgs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get prepare container args: %w", err)
-	}
+	args := b.getPrepareContainerArgs()
 
 	container.SetArgs([]string{args})
 
-	return container, nil
+	return container
 }
 
-func (b *StatefulSetBuilder) getPrepareContainerArgs() (string, error) {
+func (b *StatefulSetBuilder) getPrepareContainerArgs() string {
 	nodeAddress := fmt.Sprintf("$POD_NAME.%s.%s.svc.cluster.local", b.Name, b.Client.GetOwnerNamespace())
 
 	authArgs := ""
@@ -160,24 +142,19 @@ gomplate -f ` + constants.KubedoopConfigDirMount + `/login-identity-providers.xm
 gomplate -f ` + constants.KubedoopConfigDirMount + `/state-management.xml -o ` + NifiConfigDir + `/state-management.xml
 `
 
-	return util.IndentTab4Spaces(args), nil
+	return util.IndentTab4Spaces(args)
 }
 
-func (b *StatefulSetBuilder) getMainContainerBuilder() (builder.ContainerBuilder, error) {
-	container, err := b.getContainerTemplate(b.RoleName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get base container: %w", err)
-	}
+func (b *StatefulSetBuilder) getMainContainerBuilder() builder.ContainerBuilder {
+	container := b.getContainerTemplate(b.RoleName)
 
-	args, err := b.getMainContainerArgs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get main container args: %w", err)
-	}
+	args := b.getMainContainerArgs()
+
 	container.SetArgs([]string{args})
 	container.AddPorts(Ports)
 	b.setupMainContainerProbe(container)
 
-	return container, nil
+	return container
 }
 
 func (b *StatefulSetBuilder) setupMainContainerProbe(container builder.ContainerBuilder) {
@@ -214,7 +191,7 @@ func (b *StatefulSetBuilder) setupMainContainerProbe(container builder.Container
 	})
 }
 
-func (b *StatefulSetBuilder) getMainContainerArgs() (string, error) {
+func (b *StatefulSetBuilder) getMainContainerArgs() string {
 	args := util.CommonBashTrapFunctions + `
 
 ` + util.RemoveVectorShutdownFileCommand() + `
@@ -230,10 +207,10 @@ wait_for_termination $!
 ` + util.CreateVectorShutdownFileCommand() + `
 `
 
-	return util.IndentTab4Spaces(args), nil
+	return util.IndentTab4Spaces(args)
 }
 
-func (b *StatefulSetBuilder) getContainerEnv() ([]corev1.EnvVar, error) {
+func (b *StatefulSetBuilder) getContainerEnv() []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
 		{
 			Name: "POD_NAME",
@@ -274,10 +251,10 @@ func (b *StatefulSetBuilder) getContainerEnv() ([]corev1.EnvVar, error) {
 		envVars = append(envVars, b.Authentication.GetEnvVars()...)
 	}
 
-	return envVars, nil
+	return envVars
 }
 
-func (b *StatefulSetBuilder) getVolumeMounts() ([]corev1.VolumeMount, error) {
+func (b *StatefulSetBuilder) getVolumeMounts() []corev1.VolumeMount {
 	volumeMounts := []corev1.VolumeMount{
 		{
 			Name:      NifiConfigVolumeName,
@@ -296,10 +273,10 @@ func (b *StatefulSetBuilder) getVolumeMounts() ([]corev1.VolumeMount, error) {
 		volumeMounts = append(volumeMounts, b.Authentication.GetVolumeMounts()...)
 	}
 
-	return volumeMounts, nil
+	return volumeMounts
 }
 
-func (b *StatefulSetBuilder) getVolumes() ([]corev1.Volume, error) {
+func (b *StatefulSetBuilder) getVolumes() []corev1.Volume {
 	volumes := []corev1.Volume{
 		{
 			Name: NifiConfigVolumeName,
@@ -322,5 +299,5 @@ func (b *StatefulSetBuilder) getVolumes() ([]corev1.Volume, error) {
 		volumes = append(volumes, b.Authentication.GetVolumes()...)
 	}
 
-	return volumes, nil
+	return volumes
 }

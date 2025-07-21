@@ -85,10 +85,7 @@ func NewNifiConfigBuilder(
 
 func (b *NifiConfigMapBuilder) Build(ctx context.Context) (ctrlclient.Object, error) {
 
-	bootstarpProperties, err := b.getBootstrapConfig()
-	if err != nil {
-		return nil, err
-	}
+	bootstarpProperties := b.getBootstrapConfig()
 
 	b.AddItem("bootstrap.conf", bootstarpProperties)
 
@@ -135,7 +132,7 @@ func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
 	return util.IndentTab4Spaces(xml)
 }
 
-func (b *NifiConfigMapBuilder) getBootstrapConfig() (string, error) {
+func (b *NifiConfigMapBuilder) getBootstrapConfig() string {
 	config := map[string]string{
 		"java":                      "java",
 		"run.as":                    "",
@@ -155,7 +152,7 @@ func (b *NifiConfigMapBuilder) getBootstrapConfig() (string, error) {
 		data += fmt.Sprintf("%s=%s\n", key, config[key])
 	}
 
-	return data, nil
+	return data
 }
 
 func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, error) {
