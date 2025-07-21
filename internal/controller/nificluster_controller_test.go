@@ -44,6 +44,7 @@ var _ = Describe("NifiCluster Controller", func() {
 			By("creating the custom resource for the Kind NifiCluster")
 			err := k8sClient.Get(ctx, typeNamespacedName, nificluster)
 			if err != nil && errors.IsNotFound(err) {
+				By("Creating a new NifiCluster resource")
 				// resource := &nifiv1alpha1.NifiCluster{
 				// 	ObjectMeta: metav1.ObjectMeta{
 				// 		Name:      resourceName,
