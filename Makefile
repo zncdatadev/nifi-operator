@@ -256,10 +256,9 @@ TEST_NAMESPACE = kubedoop-operators
 
 .PHONY: helm-install-depends
 helm-install-depends: helm ## Install the helm chart depends.
-	$(HELM) repo add kubedoop https://zncdatadev.github.io/kubedoop-helm-charts/
 ifneq ($(strip $(HELM_DEPENDS)),)
 	for dep in $(HELM_DEPENDS); do \
-		$(HELM) upgrade --install --create-namespace --namespace $(TEST_NAMESPACE) --wait $$dep kubedoop/$$dep --version $(VERSION); \
+		$(HELM) upgrade --install --create-namespace --namespace $(TEST_NAMESPACE) --wait  $$dep oci://quay.io/kubedoopcharts/$$dep --version $(VERSION); \
 	done
 endif
 
