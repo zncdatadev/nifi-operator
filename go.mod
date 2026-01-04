@@ -1,6 +1,6 @@
 module github.com/zncdatadev/nifi-operator
 
-go 1.24.9
+go 1.25.5
 
 godebug default=go1.24
 
