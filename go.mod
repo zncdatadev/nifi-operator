@@ -5,7 +5,7 @@ go 1.25.5
 godebug default=go1.24
 
 require (
-	github.com/onsi/ginkgo/v2 v2.27.3
+	github.com/onsi/ginkgo/v2 v2.27.5
 	github.com/onsi/gomega v1.38.3
 	github.com/zncdatadev/operator-go v0.12.5
 	k8s.io/api v0.35.0
