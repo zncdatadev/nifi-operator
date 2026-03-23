@@ -40,6 +40,18 @@ rules:
   - list
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - nifi.kubedoop.dev
   resources:
   - nificlusters

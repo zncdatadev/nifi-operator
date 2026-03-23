@@ -2,19 +2,26 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/zncdatadev/operator-go/pkg/builder"
 	resourceClient "github.com/zncdatadev/operator-go/pkg/client"
 	"github.com/zncdatadev/operator-go/pkg/reconciler"
 	"github.com/zncdatadev/operator-go/pkg/util"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
 	"github.com/zncdatadev/nifi-operator/internal/common/security"
 	"github.com/zncdatadev/nifi-operator/internal/controller/node"
+	reportingtask "github.com/zncdatadev/nifi-operator/internal/controller/reporting_task"
 	"github.com/zncdatadev/nifi-operator/internal/version"
 )
 
-var _ reconciler.Reconciler = &Reconciler{}
+var (
+	logger = ctrl.Log.WithName("cluster")
+
+	_ reconciler.Reconciler = &Reconciler{}
+)
 
 type Reconciler struct {
 	reconciler.BaseCluster[*nifiv1alpha1.NifiClusterSpec]
@@ -79,7 +86,94 @@ func (r *Reconciler) RegisterResources(ctx context.Context) error {
 	r.AddResource(node)
 
 	r.AddResource(r.sensitiveKeyReconciler())
+
+	// Register reporting task resources (Service + Job) if enabled
+	if err := r.registerReportingTaskResources(ctx); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (r *Reconciler) registerReportingTaskResources(ctx context.Context) error {
+	if r.ClusterConfig.CreateReportingTaskJob == nil || !r.ClusterConfig.CreateReportingTaskJob.Enable {
+		logger.Info("Reporting task job is disabled, skipping")
+		return nil
+	}
+
+	clusterName := r.ClusterInfo.GetClusterName()
+	image := r.GetImage()
+
+	// Resolve authentication for the reporting task job
+	auth, err := r.getAuthentication(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get authentication for reporting task: %w", err)
+	}
+
+	// Determine TLS configuration
+	tlsEnabled := r.ClusterConfig.Tls != nil
+	var tlsSecretClass string
+	if tlsEnabled {
+		tlsSecretClass = r.ClusterConfig.Tls.ServerSecretClass
+	}
+
+	// Port constants from the node package
+	var httpsPort int32 = 9443
+	var metricsPort int32 = 8081
+
+	options := func(o *builder.Options) {
+		o.ClusterName = clusterName
+		o.Labels = r.ClusterInfo.GetLabels()
+		o.Annotations = r.ClusterInfo.GetAnnotations()
+	}
+
+	// Create the reporting task service
+	svcReconciler, err := reportingtask.NewReportingTaskServiceReconciler(
+		r.Client,
+		clusterName,
+		r.Spec.Nodes,
+		httpsPort,
+		options,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create reporting task service reconciler: %w", err)
+	}
+	r.AddResource(svcReconciler)
+
+	// Create the reporting task job
+	jobReconciler := reportingtask.NewReportingTaskJobReconciler(
+		r.Client,
+		clusterName,
+		image,
+		httpsPort,
+		metricsPort,
+		auth,
+		tlsEnabled,
+		tlsSecretClass,
+		options,
+	)
+	r.AddResource(jobReconciler)
+
+	logger.Info("Registered reporting task resources", "cluster", clusterName)
+	return nil
+}
+
+func (r *Reconciler) getAuthentication(ctx context.Context) (*security.Authentication, error) {
+	if r.ClusterConfig == nil || r.ClusterConfig.Authentication == nil {
+		return nil, nil
+	}
+
+	auth, err := security.NewAuthentication(
+		ctx,
+		r.Client,
+		r.ClusterInfo.GetClusterName(),
+		r.ClusterConfig.Authentication,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authentication: %w", err)
+	}
+
+	return auth, nil
 }
 
 func (r *Reconciler) sensitiveKeyReconciler() reconciler.Reconciler {

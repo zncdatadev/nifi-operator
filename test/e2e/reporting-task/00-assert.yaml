@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: reporting-task-admin-user-secret
+---
+apiVersion: authentication.kubedoop.dev/v1alpha1
+kind: AuthenticationClass
+metadata:
+  name: reporting-task-admin-user

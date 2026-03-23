@@ -1,0 +1,19 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: reporting-task
+spec:
+  steps:
+    - name: Create prerequisites
+      try:
+        - apply:
+            file: 00-prerequisites.yaml
+        - assert:
+            file: 00-assert.yaml
+
+    - name: Create NifiCluster with reporting task enabled
+      try:
+        - apply:
+            file: 01-nificluster.yaml
+        - assert:
+            file: 01-assert.yaml
