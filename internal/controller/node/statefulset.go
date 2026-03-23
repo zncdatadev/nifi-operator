@@ -15,6 +15,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
+	"github.com/zncdatadev/nifi-operator/internal/common"
 	"github.com/zncdatadev/nifi-operator/internal/common/security"
 	commonsv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/commons/v1alpha1"
 )
@@ -29,11 +30,12 @@ var _ builder.StatefulSetBuilder = &StatefulSetBuilder{}
 
 type StatefulSetBuilder struct {
 	builder.StatefulSet
-	Ports          []corev1.ContainerPort
-	ClusterConfig  *nifiv1alpha1.ClusterConfigSpec
-	ClusterName    string
-	RoleName       string
-	Authentication *security.Authentication
+	Ports           []corev1.ContainerPort
+	ClusterConfig   *nifiv1alpha1.ClusterConfigSpec
+	ClusterName     string
+	RoleName        string
+	Authentication  *security.Authentication
+	GitSyncResources *common.GitSyncResources
 }
 
 func NewStatefulSetReconciler(
@@ -54,6 +56,11 @@ func NewStatefulSetReconciler(
 		commonsRoleGroupConfig = roleGroupConfig.RoleGroupConfigSpec
 	}
 
+	gitSyncResources, err := common.NewGitSyncResources(clusterConfig.CustomComponentsGitSync, image)
+	if err != nil {
+		return nil, fmt.Errorf("building git-sync resources: %w", err)
+	}
+
 	stsBuilder := &StatefulSetBuilder{
 		StatefulSet: *builder.NewStatefulSetBuilder(
 			client,
@@ -70,11 +77,12 @@ func NewStatefulSetReconciler(
 				o.Annotations = roleGroupInfo.GetAnnotations()
 			},
 		),
-		ClusterConfig:  clusterConfig,
-		Ports:          ports,
-		ClusterName:    roleGroupInfo.GetClusterName(),
-		RoleName:       roleGroupInfo.GetRoleName(),
-		Authentication: authentication,
+		ClusterConfig:    clusterConfig,
+		Ports:            ports,
+		ClusterName:      roleGroupInfo.GetClusterName(),
+		RoleName:         roleGroupInfo.GetRoleName(),
+		Authentication:   authentication,
+		GitSyncResources: gitSyncResources,
 	}
 
 	return reconciler.NewStatefulSet(
@@ -87,12 +95,23 @@ func NewStatefulSetReconciler(
 func (b *StatefulSetBuilder) Build(ctx context.Context) (ctrlclient.Object, error) {
 
 	prepareContainer := b.getPrepareContainer()
-
 	b.AddInitContainer(prepareContainer.Build())
-	mainContainerBuilder := b.getMainContainerBuilder()
 
+	// Add git-sync init containers so content is available before NiFi starts.
+	for i := range b.GitSyncResources.GitSyncInitContainers {
+		b.AddInitContainer(&b.GitSyncResources.GitSyncInitContainers[i])
+	}
+
+	mainContainerBuilder := b.getMainContainerBuilder()
+	// Expose the synced git content to the main NiFi container.
+	mainContainerBuilder.AddVolumeMounts(b.GitSyncResources.GitSyncVolumeMounts)
 	mainContainer := mainContainerBuilder.Build()
 	b.AddContainer(mainContainer)
+
+	// Add git-sync sidecars for continuous synchronization.
+	for i := range b.GitSyncResources.GitSyncContainers {
+		b.AddContainer(&b.GitSyncResources.GitSyncContainers[i])
+	}
 
 	volumes := b.getVolumes()
 	b.AddVolumes(volumes)
@@ -298,6 +317,9 @@ func (b *StatefulSetBuilder) getVolumes() []corev1.Volume {
 	if b.Authentication != nil {
 		volumes = append(volumes, b.Authentication.GetVolumes()...)
 	}
+
+	// Add the EmptyDir volumes backing each git-sync instance.
+	volumes = append(volumes, b.GitSyncResources.GitSyncVolumes...)
 
 	return volumes
 }
