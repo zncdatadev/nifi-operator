@@ -35,9 +35,9 @@ spec:
       autoGenerate: true
     # Omitting zookeeperConfigMapName — NiFi uses Kubernetes-based clustering
     customComponentsGitSync:
-      - repo: https://github.com/zncdatadev/nifi-operator
+      - repo: https://github.com/lwpk110/nifi-operator
         # Use current commit hash to ensure we're testing the feature branch
-        branch: 3e777c4ddd830158247f0f16e4bf578ad1977fa8
+        branch: 071e49aae64f08bedd26cbc54e3bf87e3cd8c8a4
         # Sync the test/e2e/git-sync/processors/ directory
         gitFolder: /test/e2e/git-sync/processors
         wait: 30s
