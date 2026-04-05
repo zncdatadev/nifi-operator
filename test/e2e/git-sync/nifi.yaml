@@ -1,0 +1,47 @@
+---
+# Admin credentials for NiFi single-user authentication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nifi-git-sync-admin-secret
+stringData:
+  admin: admin
+---
+# Static AuthenticationClass backed by the admin secret
+apiVersion: authentication.kubedoop.dev/v1alpha1
+kind: AuthenticationClass
+metadata:
+  name: nifi-git-sync-admin
+spec:
+  provider:
+    static:
+      userCredentialsSecret:
+        name: nifi-git-sync-admin-secret
+---
+# NiFi cluster with two git-sync sidecars pulling from the in-cluster Gitea
+apiVersion: nifi.kubedoop.dev/v1alpha1
+kind: NifiCluster
+metadata:
+  name: nificluster-git-sync
+spec:
+  image:
+    productVersion: "2.4.0"
+    pullPolicy: IfNotPresent
+  clusterConfig:
+    authentication:
+      - authenticationClass: nifi-git-sync-admin
+    sensitiveProperties:
+      keySecret: nifi-git-sync-sensitive-key
+      autoGenerate: true
+    # Omitting zookeeperConfigMapName — NiFi uses Kubernetes-based clustering
+    customComponentsGitSync:
+      - repo: https://github.com/zncdatadev/nifi-operator
+        # Use current commit hash to ensure we're testing the feature branch
+        branch: 3e777c4ddd830158247f0f16e4bf578ad1977fa8
+        # Sync the test/e2e/git-sync/processors/ directory
+        gitFolder: /test/e2e/git-sync/processors
+        wait: 30s
+  nodes:
+    roleGroups:
+      default:
+        replicas: 1

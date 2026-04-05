@@ -1,0 +1,128 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: git-sync
+spec:
+  bindings: []
+  steps:
+    # ──────────────────────────────────────────────────────────────
+    # Step 1: Deploy NiFi cluster with customComponentsGitSync
+    #         pointing to the public GitHub repository
+    # ──────────────────────────────────────────────────────────────
+    - name: deploy nifi with git-sync
+      try:
+        - apply:
+            file: nifi.yaml
+        - assert:
+            timeout: 10m
+            file: nifi-assert.yaml
+      cleanup:
+        - sleep:
+            duration: 30s
+      catch:
+        - describe:
+            apiVersion: nifi.kubedoop.dev/v1alpha1
+            kind: NifiCluster
+            name: nificluster-git-sync
+        - describe:
+            apiVersion: apps/v1
+            kind: StatefulSet
+            name: nificluster-git-sync-node-default
+        - podLogs:
+            selector: app.kubernetes.io/instance=nificluster-git-sync
+
+    # ──────────────────────────────────────────────────────────────
+    # Step 2: Verify git-sync sidecar is injected and the synced
+    #         content is accessible from the NiFi node container
+    # ──────────────────────────────────────────────────────────────
+    - name: verify git-sync
+      try:
+        - script:
+            env:
+              - name: NAMESPACE
+                value: ($namespace)
+            content: |
+              #!/bin/bash
+              set -e
+
+              echo "=== Checking git-sync sidecar container ==="
+              CONTAINERS=$(kubectl -n "$NAMESPACE" get statefulset nificluster-git-sync-node-default \
+                -o jsonpath='{.spec.template.spec.containers[*].name}')
+              echo "Containers in StatefulSet: $CONTAINERS"
+
+              echo "$CONTAINERS" | tr ' ' '\n' | grep -q "^git-sync-0$" || {
+                echo "ERROR: git-sync-0 sidecar not found in StatefulSet spec"
+                exit 1
+              }
+              echo "PASS: git-sync-0 sidecar is present"
+
+              echo "=== Checking git-sync init container ==="
+              INIT_CONTAINERS=$(kubectl -n "$NAMESPACE" get statefulset nificluster-git-sync-node-default \
+                -o jsonpath='{.spec.template.spec.initContainers[*].name}')
+              echo "Init containers: $INIT_CONTAINERS"
+
+              echo "$INIT_CONTAINERS" | tr ' ' '\n' | grep -q "^git-sync-0-init$" || {
+                echo "ERROR: git-sync-0-init init container not found"
+                exit 1
+              }
+              echo "PASS: git-sync-0-init init container is present"
+
+              echo "=== Checking git-sync volume mount on NiFi node container ==="
+              MOUNTS=$(kubectl -n "$NAMESPACE" get statefulset nificluster-git-sync-node-default \
+                -o jsonpath='{.spec.template.spec.containers[?(@.name=="node")].volumeMounts[*].mountPath}')
+              echo "Volume mounts on 'node' container: $MOUNTS"
+
+              echo "$MOUNTS" | grep -q "/kubedoop/app/git-0" || {
+                echo "ERROR: /kubedoop/app/git-0 mount not found on 'node' container"
+                exit 1
+              }
+              echo "PASS: git-sync volume is mounted on 'node' container"
+
+              echo "=== Waiting for NiFi pod to be ready ==="
+              kubectl -n "$NAMESPACE" wait pods \
+                -l app.kubernetes.io/instance=nificluster-git-sync \
+                --for=condition=Ready --timeout=10m
+
+              POD=$(kubectl -n "$NAMESPACE" get pods \
+                -l app.kubernetes.io/instance=nificluster-git-sync \
+                -o jsonpath='{.items[0].metadata.name}')
+              echo "NiFi pod: $POD"
+
+              echo "=== Verifying synced content inside NiFi node container ==="
+              # git-sync creates: <mountPath>/current/<gitFolder>/test_processor.py
+              # => /kubedoop/app/git-0/current/test/e2e/git-sync/processors/test_processor.py
+              kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
+                test -f /kubedoop/app/git-0/current/test/e2e/git-sync/processors/test_processor.py || {
+                echo "ERROR: test_processor.py not found at expected path"
+                echo "=== Listing synced content ==="
+                kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
+                  find /kubedoop/app/git-0 -type f 2>/dev/null || true
+                exit 1
+              }
+              echo "PASS: test_processor.py found at /kubedoop/app/git-0/current/test/e2e/git-sync/processors/test_processor.py"
+
+              echo "=== Verifying file content ==="
+              kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
+                cat /kubedoop/app/git-0/current/test/e2e/git-sync/processors/test_processor.py | head -5
+              
+              echo "All git-sync checks passed!"
+      catch:
+        - podLogs:
+            selector: app.kubernetes.io/instance=nificluster-git-sync
+            container: git-sync-0
+        - podLogs:
+            selector: app.kubernetes.io/instance=nificluster-git-sync
+            container: git-sync-0-init
+        - script:
+            env:
+              - name: NAMESPACE
+                value: ($namespace)
+            content: |
+              kubectl -n "$NAMESPACE" get pods -o wide
+              POD=$(kubectl -n "$NAMESPACE" get pods \
+                -l app.kubernetes.io/instance=nificluster-git-sync \
+                -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+              if [ -n "$POD" ]; then
+                kubectl -n "$NAMESPACE" describe pod "$POD"
+              fi
+

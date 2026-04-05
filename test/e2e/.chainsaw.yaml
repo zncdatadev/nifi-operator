@@ -1,0 +1,20 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Configuration
+metadata:
+  name: e2e-tests
+spec:
+  # Stop testing on first failure
+  failFast: false
+  # Parallel execution of tests is disabled by default
+  parallel: 1
+  # Timeout for each test (10 minutes)
+  timeout: 10m
+  # Namespace template - unique per test
+  namespace:
+    template:
+      metadata:
+        name: chainsaw-e2e-{{ .TestName }}-{{ rand 8 }}
+  values:
+    # Product version passed from environment or defaulting
+    - name: product_version
+      value: ($env.PRODUCT_VERSION || '2.4.0')
