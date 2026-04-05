@@ -3,7 +3,6 @@ package common
 import (
 	"fmt"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/zncdatadev/operator-go/pkg/util"
@@ -19,8 +18,9 @@ const (
 	gitSyncMountPathPrefix     = "/kubedoop/app/git"
 	gitSyncRootDir             = "/tmp/git"
 	gitSyncLink                = "current"
-	gitSyncBinary              = "/kubedoop/git-sync"
-	gitSyncSafeDirOption       = "safe.directory"
+	// Use official git-sync image instead of expecting binary in NiFi image
+	gitSyncImage         = "registry.k8s.io/git-sync/git-sync:v4.2.1"
+	gitSyncSafeDirOption = "safe.directory"
 )
 
 // GitSyncResources holds all Kubernetes resources generated from GitSyncSpec entries.
@@ -43,8 +43,7 @@ func (r *GitSyncResources) IsGitSyncEnabled() bool {
 }
 
 // NewGitSyncResources creates GitSyncResources from a list of GitSyncSpec entries.
-// The generated containers use the same product image as NiFi, which must include
-// the git-sync binary at /kubedoop/git-sync.
+// The generated containers use the official git-sync image from Kubernetes registry.
 func NewGitSyncResources(
 	gitSyncs []nifiv1alpha1.GitSyncSpec,
 	image *util.Image,
@@ -118,12 +117,15 @@ func buildGitSyncContainer(
 	envVars []corev1.EnvVar,
 	volumeMounts []corev1.VolumeMount,
 ) corev1.Container {
+	// Use official git-sync image and command-line args
+	args := buildGitSyncArgs(gs, oneTime)
+	
 	return corev1.Container{
 		Name:            name,
-		Image:           image.String(),
-		ImagePullPolicy: image.GetPullPolicy(),
-		Command:         []string{"/bin/bash", "-x", "-euo", "pipefail", "-c"},
-		Args:            []string{buildGitSyncScript(gs, oneTime)},
+		Image:           gitSyncImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"/git-sync"},
+		Args:            args,
 		Env:             envVars,
 		VolumeMounts:    volumeMounts,
 		Resources: corev1.ResourceRequirements{
@@ -139,9 +141,8 @@ func buildGitSyncContainer(
 	}
 }
 
-// buildGitSyncScript produces the shell script that is passed as a single -c
-// argument to bash inside the git-sync container.
-func buildGitSyncScript(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) string {
+// buildGitSyncArgs produces the command-line arguments for the git-sync binary.
+func buildGitSyncArgs(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) []string {
 	branch := gs.Branch
 	if branch == "" {
 		branch = "main"
@@ -155,67 +156,33 @@ func buildGitSyncScript(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) string {
 		wait = "20s"
 	}
 
-	// Fixed arguments that the operator always sets.
-	internalArgs := map[string]string{
-		"--repo":     gs.Repo,
-		"--ref":      branch,
-		"--depth":    fmt.Sprintf("%d", depth),
-		"--period":   wait,
-		"--link":     gitSyncLink,
-		"--root":     gitSyncRootDir,
-		"--one-time": fmt.Sprintf("%t", oneTime),
+	// Build args for official git-sync v4.x
+	args := []string{
+		"--repo=" + gs.Repo,
+		"--ref=" + branch,
+		fmt.Sprintf("--depth=%d", depth),
+		"--period=" + wait,
+		"--link=" + gitSyncLink,
+		"--root=" + gitSyncRootDir,
 	}
 
-	// Internal git-config entries (safe.directory prevents ownership errors).
-	internalGitConfigParts := []string{
-		fmt.Sprintf("%s:%s", gitSyncSafeDirOption, gitSyncRootDir),
+	// Enable one-time mode for init containers
+	if oneTime {
+		args = append(args, "--one-time")
 	}
 
-	// Clone the user-supplied gitSyncConfig so we can mutate it safely.
-	userConfig := make(map[string]string, len(gs.GitSyncConfig))
+	// Add git-config for safe.directory
+	args = append(args, "--git-config=safe.directory:"+gitSyncRootDir)
+
+	// Add user-supplied git-sync config (filter out --git-config as we handle it above)
 	for k, v := range gs.GitSyncConfig {
-		userConfig[k] = v
-	}
-
-	// The user may supply additional --git-config entries; we append them.
-	userGitConfig, hasUserGitConfig := userConfig["--git-config"]
-	delete(userConfig, "--git-config")
-	if hasUserGitConfig {
-		internalGitConfigParts = append(internalGitConfigParts, userGitConfig)
-	}
-	gitConfigValue := fmt.Sprintf("'%s'", strings.Join(internalGitConfigParts, ","))
-
-	// Merge user-supplied args, but silently ignore any key that we manage.
-	finalArgs := make(map[string]string, len(internalArgs)+len(userConfig)+1)
-	for k, v := range internalArgs {
-		finalArgs[k] = v
-	}
-	for k, v := range userConfig {
-		if _, reserved := internalArgs[k]; !reserved {
-			finalArgs[k] = v
+		if k != "--git-config" && k != "--repo" && k != "--ref" && k != "--depth" &&
+			k != "--period" && k != "--link" && k != "--root" && k != "--one-time" {
+			args = append(args, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
-	finalArgs["--git-config"] = gitConfigValue
 
-	// Sort keys for a deterministic, reproducible script.
-	keys := make([]string, 0, len(finalArgs))
-	for k := range finalArgs {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var argParts []string
-	for _, k := range keys {
-		argParts = append(argParts, fmt.Sprintf("%s=%s", k, finalArgs[k]))
-	}
-	gitSyncCommand := fmt.Sprintf("%s %s", gitSyncBinary, strings.Join(argParts, " "))
-
-	if oneTime {
-		return gitSyncCommand
-	}
-
-	return fmt.Sprintf("%s\nprepare_signal_handlers\n%s &\nwait_for_termination $!",
-		util.CommonBashTrapFunctions, gitSyncCommand)
+	return args
 }
 
 func gitSyncEnvVarFromSecret(varName, secretName, secretKey string) corev1.EnvVar {
