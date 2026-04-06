@@ -99,10 +99,10 @@ func NewReportingTaskServiceBuilder(
 	// Build matching labels that include the specific pod name
 	// to ensure the service only targets a single NiFi node
 	matchingLabels := map[string]string{
-		constants.LabelKubernetesInstance:     clusterName,
-		constants.LabelKubernetesManagedBy:    constants.KubedoopDomain,
-		constants.LabelKubernetesComponent:    "node",
-		"statefulset.kubernetes.io/pod-name":  selectorPod,
+		constants.LabelKubernetesInstance:    clusterName,
+		constants.LabelKubernetesManagedBy:   constants.KubedoopDomain,
+		constants.LabelKubernetesComponent:   "node",
+		"statefulset.kubernetes.io/pod-name": selectorPod,
 	}
 
 	ports := []corev1.ContainerPort{

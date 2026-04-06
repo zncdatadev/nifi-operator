@@ -1,0 +1,46 @@
+---
+# Admin credentials for the single-user login identity provider
+apiVersion: v1
+kind: Secret
+metadata:
+  name: reporting-task-admin-user-secret
+stringData:
+  admin: admin
+---
+# Static AuthenticationClass backed by the admin secret
+apiVersion: authentication.kubedoop.dev/v1alpha1
+kind: AuthenticationClass
+metadata:
+  name: reporting-task-admin-user
+spec:
+  provider:
+    static:
+      userCredentialsSecret:
+        name: reporting-task-admin-user-secret
+---
+# NifiCluster with createReportingTaskJob enabled.
+# The operator will create:
+#   1. A headless Service (reporting-task-nifi-reporting-task) that pins to a
+#      single NiFi node for stable JWT issuer validation (required since 1.25).
+#   2. A Job that runs the Python script to register the
+#      PrometheusReportingTask via the NiFi REST API.
+apiVersion: nifi.kubedoop.dev/v1alpha1
+kind: NifiCluster
+metadata:
+  name: reporting-task-nifi
+spec:
+  clusterConfig:
+    authentication:
+      - authenticationClass: reporting-task-admin-user
+    createReportingTaskJob:
+      enable: true
+    sensitiveProperties:
+      keySecret: reporting-task-sensitive-key
+      autoGenerate: true
+    listenerClass: cluster-internal
+  image:
+    productVersion: ($product_version)
+  nodes:
+    roleGroups:
+      default:
+        replicas: 1

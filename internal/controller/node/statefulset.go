@@ -10,6 +10,7 @@ import (
 	"github.com/zncdatadev/operator-go/pkg/constants"
 	"github.com/zncdatadev/operator-go/pkg/reconciler"
 	"github.com/zncdatadev/operator-go/pkg/util"
+	appv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,6 +26,12 @@ const (
 	NifiAdminPasswordVolumeName = "nifi-admin-password"
 	EmptyDirVolumeName          = "empty-dir"
 )
+
+// NifiServiceAccountName returns the ServiceAccount name for NiFi pods.
+// Must match the name created by cluster.registerRBACResources().
+func NifiServiceAccountName(clusterName string) string {
+	return clusterName + "-nifi"
+}
 
 var _ builder.StatefulSetBuilder = &StatefulSetBuilder{}
 
@@ -116,7 +123,17 @@ func (b *StatefulSetBuilder) Build(ctx context.Context) (ctrlclient.Object, erro
 	volumes := b.getVolumes()
 	b.AddVolumes(volumes)
 
-	return b.StatefulSet.Build(ctx)
+	obj, err := b.StatefulSet.Build(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the ServiceAccount so NiFi pods can use the Role bound by cluster.registerRBACResources().
+	// Required for KubernetesLeaderElectionManager and KubernetesConfigMapStateProvider.
+	sts := obj.(*appv1.StatefulSet)
+	sts.Spec.Template.Spec.ServiceAccountName = NifiServiceAccountName(b.ClusterName)
+
+	return sts, nil
 }
 
 func (b *StatefulSetBuilder) getContainerTemplate(name string) builder.ContainerBuilder {
@@ -238,6 +255,13 @@ func (b *StatefulSetBuilder) getContainerEnv() []corev1.EnvVar {
 					FieldPath: "metadata.name",
 				},
 			},
+		},
+		// STACKLET_NAME is used as the ConfigMap name prefix for KubernetesConfigMapStateProvider
+		// (NiFi 2.x Kubernetes-native clustering) and as the Kubernetes leader election lease prefix.
+		// We use the NifiCluster name as the stacklet name, matching Stackable Rust operator behaviour.
+		{
+			Name:  "STACKLET_NAME",
+			Value: b.ClusterName,
 		},
 	}
 
