@@ -30,11 +30,11 @@ var _ builder.StatefulSetBuilder = &StatefulSetBuilder{}
 
 type StatefulSetBuilder struct {
 	builder.StatefulSet
-	Ports           []corev1.ContainerPort
-	ClusterConfig   *nifiv1alpha1.ClusterConfigSpec
-	ClusterName     string
-	RoleName        string
-	Authentication  *security.Authentication
+	Ports            []corev1.ContainerPort
+	ClusterConfig    *nifiv1alpha1.ClusterConfigSpec
+	ClusterName      string
+	RoleName         string
+	Authentication   *security.Authentication
 	GitSyncResources *common.GitSyncResources
 }
 
@@ -56,7 +56,7 @@ func NewStatefulSetReconciler(
 		commonsRoleGroupConfig = roleGroupConfig.RoleGroupConfigSpec
 	}
 
-	gitSyncResources, err := common.NewGitSyncResources(clusterConfig.CustomComponentsGitSync, image)
+	gitSyncResources, err := common.NewGitSyncResources(clusterConfig.CustomComponentsGitSync)
 	if err != nil {
 		return nil, fmt.Errorf("building git-sync resources: %w", err)
 	}

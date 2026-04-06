@@ -5,7 +5,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/zncdatadev/operator-go/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -19,8 +18,7 @@ const (
 	gitSyncRootDir             = "/tmp/git"
 	gitSyncLink                = "current"
 	// Use official git-sync image instead of expecting binary in NiFi image
-	gitSyncImage         = "registry.k8s.io/git-sync/git-sync:v4.2.1"
-	gitSyncSafeDirOption = "safe.directory"
+	gitSyncImage = "registry.k8s.io/git-sync/git-sync:v4.2.1"
 )
 
 // GitSyncResources holds all Kubernetes resources generated from GitSyncSpec entries.
@@ -44,10 +42,7 @@ func (r *GitSyncResources) IsGitSyncEnabled() bool {
 
 // NewGitSyncResources creates GitSyncResources from a list of GitSyncSpec entries.
 // The generated containers use the official git-sync image from Kubernetes registry.
-func NewGitSyncResources(
-	gitSyncs []nifiv1alpha1.GitSyncSpec,
-	image *util.Image,
-) (*GitSyncResources, error) {
+func NewGitSyncResources(gitSyncs []nifiv1alpha1.GitSyncSpec) (*GitSyncResources, error) {
 	resources := &GitSyncResources{}
 
 	for i := range gitSyncs {
@@ -73,12 +68,12 @@ func NewGitSyncResources(
 
 		sidecarContainer := buildGitSyncContainer(
 			fmt.Sprintf("%s-%d", gitSyncContainerNamePrefix, i),
-			image, gs, false, envVars, containerVolumeMounts,
+			gs, false, envVars, containerVolumeMounts,
 		)
 
 		initContainer := buildGitSyncContainer(
 			fmt.Sprintf("%s-%d-init", gitSyncContainerNamePrefix, i),
-			image, gs, true, envVars, containerVolumeMounts,
+			gs, true, envVars, containerVolumeMounts,
 		)
 
 		volume := corev1.Volume{
@@ -111,15 +106,13 @@ func NewGitSyncResources(
 
 func buildGitSyncContainer(
 	name string,
-	image *util.Image,
 	gs *nifiv1alpha1.GitSyncSpec,
 	oneTime bool,
 	envVars []corev1.EnvVar,
 	volumeMounts []corev1.VolumeMount,
 ) corev1.Container {
-	// Use official git-sync image and command-line args
 	args := buildGitSyncArgs(gs, oneTime)
-	
+
 	return corev1.Container{
 		Name:            name,
 		Image:           gitSyncImage,
@@ -166,10 +159,8 @@ func buildGitSyncArgs(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) []string {
 		"--root=" + gitSyncRootDir,
 	}
 
-	// Enable one-time mode for init containers
-	if oneTime {
-		args = append(args, "--one-time")
-	}
+	// Enable one-time mode for init containers, continuous sync for sidecars.
+	args = append(args, fmt.Sprintf("--one-time=%v", oneTime))
 
 	// Add git-config for safe.directory
 	args = append(args, "--git-config=safe.directory:"+gitSyncRootDir)
@@ -177,7 +168,8 @@ func buildGitSyncArgs(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) []string {
 	// Add user-supplied git-sync config (filter out --git-config as we handle it above)
 	for k, v := range gs.GitSyncConfig {
 		if k != "--git-config" && k != "--repo" && k != "--ref" && k != "--depth" &&
-			k != "--period" && k != "--link" && k != "--root" && k != "--one-time" {
+			k != "--period" && k != "--link" && k != "--root" && k != "--one-time=true" &&
+			k != "--one-time=false" {
 			args = append(args, fmt.Sprintf("%s=%s", k, v))
 		}
 	}

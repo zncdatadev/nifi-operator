@@ -43,7 +43,7 @@ spec:
                 value: ($namespace)
             content: |
               #!/bin/bash
-              set -e
+              set -euo pipefail
 
               echo "=== Checking git-sync sidecar container ==="
               CONTAINERS=$(kubectl -n "$NAMESPACE" get statefulset nificluster-git-sync-node-default \

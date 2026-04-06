@@ -197,7 +197,6 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.flow.configuration.archive.dir", path.Join(NifiConfigDir, "archive"))
 	properties.Add("nifi.flow.configuration.archive.max.time", "")
 	// TODO: add config.storage.flowfileRepo support
-	// properties.Add("nifi.flow.configuration.archive.max.storage", "")
 	properties.Add("nifi.flow.configuration.archive.max.count", "")
 	properties.Add("nifi.flowcontroller.autoResumeState", "true")
 	properties.Add("nifi.flowcontroller.graceful.shutdown.period", "10 sec")
@@ -400,15 +399,6 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 			}
 		}
 	}
-
-	// TODO: implement custom properties when nifi image support python env
-	// Custom properties
-	// properties.Add("nifi.python.command", "python3")
-	// properties.Add("nifi.python.framework.source.directory", path.Join(NifiRoot, "python", "framework"))
-	// properties.Add("nifi.python.framework.working.directory", path.Join(NifiRoot, "python", "working"))
-	// properties.Add("nifi.python.extensions.source.directory.default", path.Join(NifiRoot, "python", "extensions"))
-
-	// TODO: implement custom components git sync
 
 	data, err := properties.Marshal()
 	if err != nil {

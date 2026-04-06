@@ -5,20 +5,11 @@ import (
 	"testing"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
-	"github.com/zncdatadev/operator-go/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 )
 
-func makeTestImage() *util.Image {
-	return &util.Image{
-		ProductName:     "nifi",
-		KubedoopVersion: "0.0.1",
-		ProductVersion:  "2.2.0",
-	}
-}
-
 func TestNewGitSyncResources_Empty(t *testing.T) {
-	resources, err := NewGitSyncResources(nil, makeTestImage())
+	resources, err := NewGitSyncResources(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +45,7 @@ func TestNewGitSyncResources_SingleEntry_Defaults(t *testing.T) {
 		},
 	}
 
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +99,7 @@ func TestNewGitSyncResources_GitFolder_SubPath(t *testing.T) {
 		},
 	}
 
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +122,7 @@ func TestNewGitSyncResources_CredentialsSecret(t *testing.T) {
 		},
 	}
 
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,7 +154,7 @@ func TestNewGitSyncResources_NoCredentials_NoEnvVars(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
 		{Repo: "https://github.com/public/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
 	}
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,18 +167,33 @@ func TestNewGitSyncResources_OneTimeFlag(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
 		{Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
 	}
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	initScript := resources.GitSyncInitContainers[0].Args[0]
-	if !strings.Contains(initScript, "--one-time=true") {
-		t.Error("init container script must include --one-time=true")
+	// Init container must include --one-time=true.
+	initHasOneTimeTrue := false
+	for _, arg := range resources.GitSyncInitContainers[0].Args {
+		if arg == "--one-time=true" {
+			initHasOneTimeTrue = true
+			break
+		}
 	}
-	sidecarScript := resources.GitSyncContainers[0].Args[0]
-	if !strings.Contains(sidecarScript, "--one-time=false") {
-		t.Error("sidecar container script must include --one-time=false")
+	if !initHasOneTimeTrue {
+		t.Errorf("init container args must include --one-time=true, got %v", resources.GitSyncInitContainers[0].Args)
+	}
+
+	// Sidecar container must include --one-time=false.
+	sidecarHasOneTimeFalse := false
+	for _, arg := range resources.GitSyncContainers[0].Args {
+		if arg == "--one-time=false" {
+			sidecarHasOneTimeFalse = true
+			break
+		}
+	}
+	if !sidecarHasOneTimeFalse {
+		t.Errorf("sidecar container args must include --one-time=false, got %v", resources.GitSyncContainers[0].Args)
 	}
 }
 
@@ -195,11 +201,11 @@ func TestNewGitSyncResources_EmptyDirVolume(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
 		{Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
 	}
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resources.GitSyncVolumes[0].VolumeSource.EmptyDir == nil {
+	if resources.GitSyncVolumes[0].EmptyDir == nil {
 		t.Error("expected EmptyDir volume source")
 	}
 }
@@ -208,7 +214,7 @@ func TestNewGitSyncResources_Resources(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
 		{Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
 	}
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -238,7 +244,7 @@ func TestNewGitSyncResources_Multiple(t *testing.T) {
 		{Repo: "https://github.com/example/repo2", Branch: "develop", Depth: 2, GitFolder: "/nar", Wait: "30s"},
 	}
 
-	resources, err := NewGitSyncResources(gitSyncs, makeTestImage())
+	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -254,7 +260,7 @@ func TestNewGitSyncResources_Multiple(t *testing.T) {
 	}
 }
 
-func TestBuildGitSyncScript_ContainsSafeDirConfig(t *testing.T) {
+func TestBuildGitSyncArgs_ContainsSafeDirConfig(t *testing.T) {
 	gs := &nifiv1alpha1.GitSyncSpec{
 		Repo:      "https://github.com/example/repo",
 		Branch:    "main",
@@ -262,35 +268,15 @@ func TestBuildGitSyncScript_ContainsSafeDirConfig(t *testing.T) {
 		GitFolder: "/",
 		Wait:      "20s",
 	}
-	script := buildGitSyncScript(gs, false)
-	if !strings.Contains(script, "safe.directory:/tmp/git") {
-		t.Errorf("expected safe.directory config in script, got:\n%s", script)
+	args := buildGitSyncArgs(gs, false)
+	found := false
+	for _, arg := range args {
+		if strings.Contains(arg, "safe.directory") {
+			found = true
+			break
+		}
 	}
-}
-
-func TestBuildGitSyncScript_SidecarHasTrapFunctions(t *testing.T) {
-	gs := &nifiv1alpha1.GitSyncSpec{
-		Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s",
-	}
-	script := buildGitSyncScript(gs, false)
-	if !strings.Contains(script, "prepare_signal_handlers") {
-		t.Error("sidecar script should contain prepare_signal_handlers")
-	}
-	if !strings.Contains(script, "wait_for_termination") {
-		t.Error("sidecar script should contain wait_for_termination")
-	}
-}
-
-func TestBuildGitSyncScript_InitIsOneShot(t *testing.T) {
-	gs := &nifiv1alpha1.GitSyncSpec{
-		Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s",
-	}
-	script := buildGitSyncScript(gs, true)
-	// Init script should NOT have the background & operator
-	if strings.Contains(script, "prepare_signal_handlers") {
-		t.Error("init script should not contain prepare_signal_handlers")
-	}
-	if strings.Contains(script, "wait_for_termination") {
-		t.Error("init script should not contain wait_for_termination")
+	if !found {
+		t.Errorf("expected safe.directory config in args, got: %v", args)
 	}
 }

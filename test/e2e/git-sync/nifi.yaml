@@ -18,7 +18,7 @@ spec:
       userCredentialsSecret:
         name: nifi-git-sync-admin-secret
 ---
-# NiFi cluster with two git-sync sidecars pulling from the in-cluster Gitea
+# NiFi cluster with git-sync pulling custom components from the public GitHub repository
 apiVersion: nifi.kubedoop.dev/v1alpha1
 kind: NifiCluster
 metadata:
