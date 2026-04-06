@@ -396,9 +396,10 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	// nifi.security.allow.anonymous.authentication
 	properties.Add("nifi.security.allow.anonymous.authentication", "false")
 	// nifi cluster mode
-	if b.ClusterConfig.ZookeeperConfigMapName == nil {
+	if !b.useZooKeeperStateProvider() {
 		// Kubernetes-native clustering (NiFi 2.x only):
-		// No ZooKeeper — use KubernetesLeaderElectionManager for leader election.
+		// No ZooKeeper — nil or empty ZookeeperConfigMapName means k8s-native mode.
+		// Use KubernetesLeaderElectionManager for leader election.
 		// NiFi 1.x does not support this mode and requires ZooKeeper.
 		// TODO: validate product version is 2.x when this path is taken.
 		if enableTls {
@@ -413,8 +414,8 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 		properties.Add("nifi.cluster.node.address", `{{ getenv "NODE_ADDRESS" }}`)
 		properties.Add("nifi.cluster.leader.election.implementation", "KubernetesLeaderElectionManager")
 		properties.Add("nifi.cluster.leader.election.kubernetes.lease.prefix", `{{ getenv "STACKLET_NAME" }}`)
-	} else if b.ClusterConfig.ZookeeperConfigMapName != nil && *b.ClusterConfig.ZookeeperConfigMapName != "" {
-		// Clustered mode with ZooKeeper.
+	} else {
+		// Clustered mode with ZooKeeper (ZookeeperConfigMapName is non-nil and non-empty).
 		if enableTls {
 			properties.Add("nifi.cluster.protocol.is.secure", "true")
 		} else {
@@ -431,9 +432,6 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 		properties.Add("nifi.zookeeper.connect.string", `{{ getenv "ZOOKEEPER_HOSTS" }}`)
 		// nifi.zookeeper.root.node
 		properties.Add("nifi.zookeeper.root.node", `{{ getenv "ZOOKEEPER_CHROOT" }}`)
-	} else {
-		// raise error if zookeeperConfigMapName is empty
-		return "", fmt.Errorf("zookeeperConfigMapName is required when clustering backend is zookeeper")
 	}
 
 	if b.ClusterConfig.Authentication != nil {

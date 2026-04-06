@@ -42,7 +42,7 @@ func getReportingTaskServiceSelectorPod(clusterName string, nodes *nifiv1alpha1.
 		rg   nifiv1alpha1.RoleGroupSpec
 	}
 
-	var sorted []rgEntry
+	sorted := make([]rgEntry, 0, len(nodes.RoleGroups))
 	for name, rg := range nodes.RoleGroups {
 		sorted = append(sorted, rgEntry{name: name, rg: rg})
 	}

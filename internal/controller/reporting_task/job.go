@@ -84,10 +84,7 @@ func (b *ReportingTaskJobBuilder) Build(_ context.Context) (ctrlclient.Object, e
 		return nil, fmt.Errorf("failed to get image with tag: %w", err)
 	}
 
-	container, err := b.buildContainer(imageTag)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build container: %w", err)
-	}
+	container := b.buildContainer(imageTag)
 
 	volumes := b.buildVolumes()
 
@@ -131,7 +128,7 @@ func (b *ReportingTaskJobBuilder) Build(_ context.Context) (ctrlclient.Object, e
 	return job, nil
 }
 
-func (b *ReportingTaskJobBuilder) buildContainer(imageTag string) (*corev1.Container, error) {
+func (b *ReportingTaskJobBuilder) buildContainer(imageTag string) *corev1.Container {
 	reportingTaskFQDN := ReportingTaskFQDNServiceName(b.ClusterName, b.Namespace)
 
 	var nifiConnectURL string
@@ -151,9 +148,9 @@ func (b *ReportingTaskJobBuilder) buildContainer(imageTag string) (*corev1.Conta
 		fmt.Sprintf("-u %s", adminUsername),
 	}
 
-	// Add password argument based on authentication type
-	adminPasswordFile := b.getAdminPasswordFile()
-	if adminPasswordFile != "" {
+	// Add password argument only when authentication is configured and provides credentials.
+	if b.Authentication != nil {
+		adminPasswordFile := b.getAdminPasswordFile()
 		args = append(args, fmt.Sprintf("-p \"$(cat %s)\"", adminPasswordFile))
 	}
 
@@ -162,8 +159,8 @@ func (b *ReportingTaskJobBuilder) buildContainer(imageTag string) (*corev1.Conta
 		fmt.Sprintf("-m %d", b.MetricsPort),
 	)
 
-	// Add CA cert argument if TLS is enabled
-	if b.TlsEnabled {
+	// Add CA cert argument if TLS is enabled with a secret class (volume will be mounted)
+	if b.TlsEnabled && b.TlsSecretClass != "" {
 		args = append(args, fmt.Sprintf("-c %s", path.Join(ReportingTaskCertVolumeMount, "ca.crt")))
 	}
 
@@ -187,7 +184,7 @@ func (b *ReportingTaskJobBuilder) buildContainer(imageTag string) (*corev1.Conta
 		VolumeMounts: volumeMounts,
 	}
 
-	return container, nil
+	return container
 }
 
 // getAdminPasswordFile returns the path to the admin password file based on authentication type.
@@ -199,8 +196,9 @@ func (b *ReportingTaskJobBuilder) getAdminPasswordFile() string {
 func (b *ReportingTaskJobBuilder) buildVolumeMounts() []corev1.VolumeMount {
 	var volumeMounts []corev1.VolumeMount
 
-	// TLS certificate volume mount
-	if b.TlsEnabled {
+	// TLS certificate volume mount — only when a secret class is also configured
+	// so the mount and volume are always created together.
+	if b.TlsEnabled && b.TlsSecretClass != "" {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      ReportingTaskCertVolumeName,
 			MountPath: ReportingTaskCertVolumeMount,

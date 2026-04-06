@@ -130,7 +130,10 @@ func (b *StatefulSetBuilder) Build(ctx context.Context) (ctrlclient.Object, erro
 
 	// Set the ServiceAccount so NiFi pods can use the Role bound by cluster.registerRBACResources().
 	// Required for KubernetesLeaderElectionManager and KubernetesConfigMapStateProvider.
-	sts := obj.(*appv1.StatefulSet)
+	sts, ok := obj.(*appv1.StatefulSet)
+	if !ok {
+		return nil, fmt.Errorf("expected *appv1.StatefulSet from StatefulSet builder, got %T", obj)
+	}
 	sts.Spec.Template.Spec.ServiceAccountName = NifiServiceAccountName(b.ClusterName)
 
 	return sts, nil

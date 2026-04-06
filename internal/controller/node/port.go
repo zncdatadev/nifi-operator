@@ -28,6 +28,11 @@ var (
 )
 
 func getPort(name string) int32 {
+	return GetPort(name)
+}
+
+// GetPort returns the container port number for the named NiFi port.
+func GetPort(name string) int32 {
 	for _, port := range Ports {
 		if port.Name == name {
 			return port.ContainerPort

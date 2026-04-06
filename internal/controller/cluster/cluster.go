@@ -135,8 +135,15 @@ func (r *Reconciler) registerReportingTaskResources(ctx context.Context) error {
 		tlsSecretClass = r.ClusterConfig.Tls.ServerSecretClass
 	}
 
-	// Port constants from the node package
-	var httpsPort int32 = 9443
+	// Port constants from the node package.
+	// Select the web port based on TLS: use HTTPS (9443) when TLS is enabled,
+	// HTTP (8088) otherwise. This matches node.Ports definitions.
+	var webPort int32
+	if tlsEnabled {
+		webPort = node.GetPort("https")
+	} else {
+		webPort = node.GetPort("http")
+	}
 	var metricsPort int32 = 8081
 
 	options := func(o *builder.Options) {
@@ -150,7 +157,7 @@ func (r *Reconciler) registerReportingTaskResources(ctx context.Context) error {
 		r.Client,
 		clusterName,
 		r.Spec.Nodes,
-		httpsPort,
+		webPort,
 		options,
 	)
 	if err != nil {
@@ -163,7 +170,7 @@ func (r *Reconciler) registerReportingTaskResources(ctx context.Context) error {
 		r.Client,
 		clusterName,
 		image,
-		httpsPort,
+		webPort,
 		metricsPort,
 		auth,
 		tlsEnabled,
@@ -176,13 +183,6 @@ func (r *Reconciler) registerReportingTaskResources(ctx context.Context) error {
 	return nil
 }
 
-// NifiServiceAccountName returns the name of the ServiceAccount used by NiFi pods.
-// Centralised here so that cluster.go (RBAC creation) and node/statefulset.go
-// (pod spec) always agree on the same name.
-func NifiServiceAccountName(clusterName string) string {
-	return clusterName + "-nifi"
-}
-
 // registerRBACResources creates the ServiceAccount, Role, and RoleBinding that
 // NiFi pods need in Kubernetes-native clustering mode (no ZooKeeper):
 //   - leases (coordination.k8s.io): required by KubernetesLeaderElectionManager
@@ -191,7 +191,7 @@ func NifiServiceAccountName(clusterName string) string {
 // TODO: skip this when ZooKeeper is configured (ZK-mode doesn't need these).
 func (r *Reconciler) registerRBACResources() error {
 	clusterName := r.ClusterInfo.GetClusterName()
-	saName := NifiServiceAccountName(clusterName)
+	saName := node.NifiServiceAccountName(clusterName)
 	roleName := clusterName + "-nifi"
 	roleBindingName := clusterName + "-nifi"
 
