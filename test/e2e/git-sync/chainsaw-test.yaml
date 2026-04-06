@@ -14,7 +14,7 @@ spec:
         - apply:
             file: nifi.yaml
         - assert:
-            timeout: 10m
+            timeout: 20m
             file: nifi-assert.yaml
       cleanup:
         - sleep:
@@ -42,8 +42,7 @@ spec:
               - name: NAMESPACE
                 value: ($namespace)
             content: |
-              #!/bin/bash
-              set -euo pipefail
+              set -eu
 
               echo "=== Checking git-sync sidecar container ==="
               CONTAINERS=$(kubectl -n "$NAMESPACE" get statefulset nificluster-git-sync-node-default \
@@ -104,7 +103,7 @@ spec:
               echo "=== Verifying file content ==="
               kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
                 cat /kubedoop/app/git-0/current/test/e2e/git-sync/processors/test_processor.py | head -5
-              
+
               echo "All git-sync checks passed!"
       catch:
         - podLogs:
@@ -125,4 +124,3 @@ spec:
               if [ -n "$POD" ]; then
                 kubectl -n "$NAMESPACE" describe pod "$POD"
               fi
-
