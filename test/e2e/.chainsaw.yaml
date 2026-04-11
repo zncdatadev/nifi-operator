@@ -1,0 +1,9 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Configuration
+metadata:
+  name: e2e-tests
+spec:
+  # Continue testing after failures
+  failFast: false
+  # Parallel execution of tests
+  parallel: 1

@@ -1,0 +1,9 @@
+# StatefulSet name follows operator-go convention: <clusterName>-<roleName>-<roleGroupName>
+# clusterName=nificluster-git-sync, roleName=node, roleGroupName=default
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nificluster-git-sync-node-default
+status:
+  replicas: 1
+  readyReplicas: 1
