@@ -8,6 +8,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	testRepoURL       = "https://github.com/example/repo"
+	testGitBranch     = "main"
+	testGitSyncWait   = "20s"
+	testGitSecretName = "my-git-secret"
+)
+
 func TestNewGitSyncResources_Empty(t *testing.T) {
 	resources, err := NewGitSyncResources(nil)
 	if err != nil {
@@ -37,11 +44,11 @@ func TestNewGitSyncResources_Empty(t *testing.T) {
 func TestNewGitSyncResources_SingleEntry_Defaults(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
 		{
-			Repo:      "https://github.com/example/repo",
-			Branch:    "main",
+			Repo:      testRepoURL,
+			Branch:    testGitBranch,
 			Depth:     1,
 			GitFolder: "/",
-			Wait:      "20s",
+			Wait:      testGitSyncWait,
 		},
 	}
 
@@ -114,11 +121,11 @@ func TestNewGitSyncResources_CredentialsSecret(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
 		{
 			Repo:              "https://github.com/private/repo",
-			Branch:            "main",
+			Branch:            testGitBranch,
 			Depth:             1,
 			GitFolder:         "/",
-			Wait:              "20s",
-			CredentialsSecret: "my-git-secret",
+			Wait:              testGitSyncWait,
+			CredentialsSecret: testGitSecretName,
 		},
 	}
 
@@ -131,12 +138,12 @@ func TestNewGitSyncResources_CredentialsSecret(t *testing.T) {
 	for _, e := range resources.GitSyncContainers[0].Env {
 		switch e.Name {
 		case "GITSYNC_USERNAME":
-			if e.ValueFrom.SecretKeyRef.Name != "my-git-secret" || e.ValueFrom.SecretKeyRef.Key != "user" {
+			if e.ValueFrom.SecretKeyRef.Name != testGitSecretName || e.ValueFrom.SecretKeyRef.Key != "user" {
 				t.Errorf("GITSYNC_USERNAME has wrong secret ref: %+v", e.ValueFrom)
 			}
 			found["GITSYNC_USERNAME"] = true
 		case "GITSYNC_PASSWORD":
-			if e.ValueFrom.SecretKeyRef.Name != "my-git-secret" || e.ValueFrom.SecretKeyRef.Key != "password" {
+			if e.ValueFrom.SecretKeyRef.Name != testGitSecretName || e.ValueFrom.SecretKeyRef.Key != "password" {
 				t.Errorf("GITSYNC_PASSWORD has wrong secret ref: %+v", e.ValueFrom)
 			}
 			found["GITSYNC_PASSWORD"] = true
@@ -152,7 +159,7 @@ func TestNewGitSyncResources_CredentialsSecret(t *testing.T) {
 
 func TestNewGitSyncResources_NoCredentials_NoEnvVars(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
-		{Repo: "https://github.com/public/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
+		{Repo: "https://github.com/public/repo", Branch: testGitBranch, Depth: 1, GitFolder: "/", Wait: testGitSyncWait},
 	}
 	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
@@ -165,7 +172,7 @@ func TestNewGitSyncResources_NoCredentials_NoEnvVars(t *testing.T) {
 
 func TestNewGitSyncResources_OneTimeFlag(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
-		{Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
+		{Repo: testRepoURL, Branch: testGitBranch, Depth: 1, GitFolder: "/", Wait: testGitSyncWait},
 	}
 	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
@@ -199,7 +206,7 @@ func TestNewGitSyncResources_OneTimeFlag(t *testing.T) {
 
 func TestNewGitSyncResources_EmptyDirVolume(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
-		{Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
+		{Repo: testRepoURL, Branch: testGitBranch, Depth: 1, GitFolder: "/", Wait: testGitSyncWait},
 	}
 	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
@@ -212,7 +219,7 @@ func TestNewGitSyncResources_EmptyDirVolume(t *testing.T) {
 
 func TestNewGitSyncResources_Resources(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
-		{Repo: "https://github.com/example/repo", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
+		{Repo: testRepoURL, Branch: testGitBranch, Depth: 1, GitFolder: "/", Wait: testGitSyncWait},
 	}
 	resources, err := NewGitSyncResources(gitSyncs)
 	if err != nil {
@@ -240,7 +247,7 @@ func TestNewGitSyncResources_Resources(t *testing.T) {
 
 func TestNewGitSyncResources_Multiple(t *testing.T) {
 	gitSyncs := []nifiv1alpha1.GitSyncSpec{
-		{Repo: "https://github.com/example/repo1", Branch: "main", Depth: 1, GitFolder: "/", Wait: "20s"},
+		{Repo: "https://github.com/example/repo1", Branch: testGitBranch, Depth: 1, GitFolder: "/", Wait: testGitSyncWait},
 		{Repo: "https://github.com/example/repo2", Branch: "develop", Depth: 2, GitFolder: "/nar", Wait: "30s"},
 	}
 
@@ -262,11 +269,11 @@ func TestNewGitSyncResources_Multiple(t *testing.T) {
 
 func TestBuildGitSyncArgs_ContainsSafeDirConfig(t *testing.T) {
 	gs := &nifiv1alpha1.GitSyncSpec{
-		Repo:      "https://github.com/example/repo",
-		Branch:    "main",
+		Repo:      testRepoURL,
+		Branch:    testGitBranch,
 		Depth:     1,
 		GitFolder: "/",
-		Wait:      "20s",
+		Wait:      testGitSyncWait,
 	}
 	args := buildGitSyncArgs(gs, false)
 	found := false

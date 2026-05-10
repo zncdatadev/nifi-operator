@@ -19,6 +19,9 @@ const (
 	gitSyncLink                = "current"
 	// Use official git-sync image instead of expecting binary in NiFi image
 	gitSyncImage = "registry.k8s.io/git-sync/git-sync:v4.2.1"
+	// Default values used when GitSyncSpec fields are empty.
+	defaultGitBranch   = "main"
+	defaultGitSyncWait = "20s"
 )
 
 // GitSyncResources holds all Kubernetes resources generated from GitSyncSpec entries.
@@ -138,7 +141,7 @@ func buildGitSyncContainer(
 func buildGitSyncArgs(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) []string {
 	branch := gs.Branch
 	if branch == "" {
-		branch = "main"
+		branch = defaultGitBranch
 	}
 	depth := gs.Depth
 	if depth == 0 {
@@ -146,7 +149,7 @@ func buildGitSyncArgs(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) []string {
 	}
 	wait := gs.Wait
 	if wait == "" {
-		wait = "20s"
+		wait = defaultGitSyncWait
 	}
 
 	// Build args for official git-sync v4.x
