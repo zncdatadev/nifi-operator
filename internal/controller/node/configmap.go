@@ -7,6 +7,7 @@ import (
 	"path"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/zncdatadev/operator-go/pkg/builder"
 	"github.com/zncdatadev/operator-go/pkg/client"
@@ -50,6 +51,7 @@ type NifiConfigMapBuilder struct {
 	builder.ConfigMapBuilder
 
 	ClusterConfig *nifiv1alpha1.ClusterConfigSpec
+	Image         *util.Image
 
 	ClusterName    string
 	RoleName       string
@@ -61,6 +63,7 @@ type NifiConfigMapBuilder struct {
 func NewNifiConfigBuilder(
 	client *client.Client,
 	clusterConfig *nifiv1alpha1.ClusterConfigSpec,
+	image *util.Image,
 	roleGroupInfo reconciler.RoleGroupInfo,
 	config *nifiv1alpha1.ConfigSpec,
 	authentication *security.Authentication,
@@ -75,6 +78,7 @@ func NewNifiConfigBuilder(
 			},
 		),
 		ClusterConfig:  clusterConfig,
+		Image:          image,
 		ClusterName:    roleGroupInfo.ClusterName,
 		RoleName:       roleGroupInfo.RoleName,
 		RoleGroupName:  roleGroupInfo.RoleGroupName,
@@ -105,10 +109,14 @@ func (b *NifiConfigMapBuilder) Build(ctx context.Context) (ctrlclient.Object, er
 	return b.GetObject(), nil
 }
 
-func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
+// useZooKeeperStateProvider returns true when a ZooKeeper configmap is configured.
+func (b *NifiConfigMapBuilder) useZooKeeperStateProvider() bool {
+	return b.ClusterConfig.ZookeeperConfigMapName != nil &&
+		*b.ClusterConfig.ZookeeperConfigMapName != ""
+}
 
-	xml := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<stateManagement>
+func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
+	localProviderBlock := `
 	<local-provider>
 		<id>local-provider</id>
 		<class>org.apache.nifi.controller.state.providers.local.WriteAheadLocalStateProvider</class>
@@ -116,8 +124,12 @@ func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
 		<property name="Always Sync">false</property>
 		<property name="Partitions">16</property>
 		<property name="Checkpoint Interval">2 mins</property>
-	</local-provider>
+	</local-provider>`
 
+	var clusterProviderBlock string
+	if b.useZooKeeperStateProvider() {
+		// ZooKeeper-based clustering: use ZooKeeperStateProvider for cluster state.
+		clusterProviderBlock = `
 	<cluster-provider>
 		<id>zk-provider</id>
 		<class>org.apache.nifi.controller.state.providers.zookeeper.ZooKeeperStateProvider</class>
@@ -125,7 +137,23 @@ func (b *NifiConfigMapBuilder) getStateManagementConfig() string {
 		<property name="Root Node">{{ getenv "ZOOKEEPER_CHROOT" }}</property>
 		<property name="Session Timeout">15 seconds</property>
 		<property name="Access Control">Open</property>
-	</cluster-provider>
+	</cluster-provider>`
+	} else {
+		// Kubernetes-native clustering (NiFi 2.x only):
+		// Use KubernetesConfigMapStateProvider which stores cluster state in Kubernetes
+		// ConfigMaps — the only CLUSTER-scope provider available without ZooKeeper.
+		// NiFi 1.x does not ship this provider and must use ZooKeeper instead.
+		// TODO: validate that product version is 2.x when this path is taken.
+		clusterProviderBlock = `
+	<cluster-provider>
+		<id>kubernetes-provider</id>
+		<class>org.apache.nifi.kubernetes.state.provider.KubernetesConfigMapStateProvider</class>
+		<property name="ConfigMap Name Prefix">{{ getenv "STACKLET_NAME" }}</property>
+	</cluster-provider>`
+	}
+
+	xml := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<stateManagement>` + localProviderBlock + clusterProviderBlock + `
 </stateManagement>
 `
 
@@ -181,7 +209,13 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	// nifi.state.management.provider.local
 	properties.Add("nifi.state.management.provider.local", "local-provider")
 	// nifi.state.management.provider.cluster
-	properties.Add("nifi.state.management.provider.cluster", "zk-provider")
+	if b.useZooKeeperStateProvider() {
+		properties.Add("nifi.state.management.provider.cluster", "zk-provider")
+	} else {
+		// NiFi 2.x Kubernetes-native: references the KubernetesConfigMapStateProvider
+		// defined in state-management.xml.
+		properties.Add("nifi.state.management.provider.cluster", "kubernetes-provider")
+	}
 	// nifi.state.management.embedded.zookeeper.start
 	properties.Add("nifi.state.management.embedded.zookeeper.start", "false")
 
@@ -290,9 +324,10 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	// web properties
 	// nifi.web.https.hos
 	if enableTls {
-		// NODE_ADDRESS is constracted by shell script before start nifi,
-		// it is pod FQDN
-		properties.Add("nifi.web.https.host", `{{ getenv "NODE_ADDRESS" }}`)
+		// Leave nifi.web.https.host blank so Jetty binds to all interfaces (0.0.0.0).
+		// Setting it to NODE_ADDRESS (pod FQDN) would restrict Jetty to the pod IP,
+		// making localhost:9443 unreachable from within the pod (e.g. kubectl exec).
+		properties.Add("nifi.web.https.host", "")
 		// nifi.web.https.poomitemptyrt
 		properties.Add("nifi.web.https.port", strconv.FormatInt(int64(getPort("https")), 10))
 		// nifi.web.https.network.interface.default
@@ -312,8 +347,8 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 		// nifi.security.truststorePasswd
 		properties.Add("nifi.security.truststorePasswd", DefaultServerTlsStorePassword)
 	}
-	// nifi.web.http.host
-	properties.Add("nifi.web.http.host", `{{ getenv "NODE_ADDRESS" }}`)
+	// nifi.web.http.host - leave blank so Jetty binds to all interfaces
+	properties.Add("nifi.web.http.host", "")
 	// nifi.web.http.port
 	properties.Add("nifi.web.http.port", strconv.FormatInt(int64(getPort("http")), 10))
 	// nifi.web.http.network.interface.default
@@ -327,6 +362,19 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.web.max.header.size", "16 KB")
 	// nifi.web.proxy.context.path
 	properties.Add("nifi.web.proxy.context.path", "")
+
+	// nifi.web.proxy.host
+	// For NiFi 1.x with the PrometheusReportingTask Job enabled, the Job connects
+	// to NiFi via a dedicated Service whose FQDN differs from the pod's NODE_ADDRESS.
+	// NiFi validates the Host header against nifi.web.proxy.host, so we must allow
+	// that FQDN here — consistent with Stackable Rust operator's get_proxy_hosts().
+	if b.Image != nil && strings.HasPrefix(b.Image.ProductVersion, "1.") &&
+		b.ClusterConfig.CreateReportingTaskJob != nil && b.ClusterConfig.CreateReportingTaskJob.Enable {
+		namespace := b.Client.GetOwnerNamespace()
+		reportingTaskFQDN := fmt.Sprintf("%s-reporting-task.%s.svc.cluster.local:%d",
+			b.ClusterName, namespace, getPort("https"))
+		properties.Add("nifi.web.proxy.host", reportingTaskFQDN)
+	}
 
 	// nifi.sensitive.props.key
 	properties.Add("nifi.sensitive.props.key", fmt.Sprintf("${file:UTF-8:%s}", path.Join(constants.KubedoopRoot, "sensitiveproperty", "nifiSensitivePropsKey")))
@@ -347,42 +395,43 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 	properties.Add("nifi.security.user.authorizer", "authorizer")
 	// nifi.security.allow.anonymous.authentication
 	properties.Add("nifi.security.allow.anonymous.authentication", "false")
-	if enableTls {
-		// nifi.cluster.protocol.is.secure
-		properties.Add("nifi.cluster.protocol.is.secure", "true")
-	} else {
-		// nifi.cluster.protocol.is.secure
-		properties.Add("nifi.cluster.protocol.is.secure", "false")
-	}
-	// nifi.cluster.node.protocol.port
-	properties.Add("nifi.cluster.node.protocol.port", strconv.FormatInt(int64(getPort("protocol")), 10))
-	// nifi.cluster.flow.election.max.wait.time
-	properties.Add("nifi.cluster.flow.election.max.wait.time", "1 min")
-	// nifi.cluster.flow.election.max.candidates
-	properties.Add("nifi.cluster.flow.election.max.candidates", "")
-
-	// nifi.cluster.is.node
-	properties.Add("nifi.cluster.is.node", "true")
-	// nifi.cluster.node.address
-	properties.Add("nifi.cluster.node.address", `{{ getenv "NODE_ADDRESS" }}`)
-
 	// nifi cluster mode
-	if b.ClusterConfig.ZookeeperConfigMapName == nil {
-		// If not set zookeeperConfigMapName, use kubernetes as clustering backend
-		// nifi.cluster.leader.election.implementation
+	if !b.useZooKeeperStateProvider() {
+		// Kubernetes-native clustering (NiFi 2.x only):
+		// No ZooKeeper — nil or empty ZookeeperConfigMapName means k8s-native mode.
+		// Use KubernetesLeaderElectionManager for leader election.
+		// NiFi 1.x does not support this mode and requires ZooKeeper.
+		// TODO: validate product version is 2.x when this path is taken.
+		if enableTls {
+			properties.Add("nifi.cluster.protocol.is.secure", "true")
+		} else {
+			properties.Add("nifi.cluster.protocol.is.secure", "false")
+		}
+		properties.Add("nifi.cluster.node.protocol.port", strconv.FormatInt(int64(getPort("protocol")), 10))
+		properties.Add("nifi.cluster.flow.election.max.wait.time", "1 min")
+		properties.Add("nifi.cluster.flow.election.max.candidates", "")
+		properties.Add("nifi.cluster.is.node", "true")
+		properties.Add("nifi.cluster.node.address", `{{ getenv "NODE_ADDRESS" }}`)
 		properties.Add("nifi.cluster.leader.election.implementation", "KubernetesLeaderElectionManager")
-		// nifi.cluster.leader.election.kubernetes.lease.prefix
 		properties.Add("nifi.cluster.leader.election.kubernetes.lease.prefix", `{{ getenv "STACKLET_NAME" }}`)
-	} else if b.ClusterConfig.ZookeeperConfigMapName != nil && *b.ClusterConfig.ZookeeperConfigMapName != "" {
+	} else {
+		// Clustered mode with ZooKeeper (ZookeeperConfigMapName is non-nil and non-empty).
+		if enableTls {
+			properties.Add("nifi.cluster.protocol.is.secure", "true")
+		} else {
+			properties.Add("nifi.cluster.protocol.is.secure", "false")
+		}
+		properties.Add("nifi.cluster.node.protocol.port", strconv.FormatInt(int64(getPort("protocol")), 10))
+		properties.Add("nifi.cluster.flow.election.max.wait.time", "1 min")
+		properties.Add("nifi.cluster.flow.election.max.candidates", "")
+		properties.Add("nifi.cluster.is.node", "true")
+		properties.Add("nifi.cluster.node.address", `{{ getenv "NODE_ADDRESS" }}`)
 		// nifi.cluster.leader.election.implementation
 		properties.Add("nifi.cluster.leader.election.implementation", "CuratorLeaderElectionManager")
 		// nifi.zookeeper.connect.string
 		properties.Add("nifi.zookeeper.connect.string", `{{ getenv "ZOOKEEPER_HOSTS" }}`)
 		// nifi.zookeeper.root.node
 		properties.Add("nifi.zookeeper.root.node", `{{ getenv "ZOOKEEPER_CHROOT" }}`)
-	} else {
-		// raise error if zookeeperConfigMapName is empty
-		return "", fmt.Errorf("zookeeperConfigMapName is required when clustering backend is zookeeper")
 	}
 
 	if b.ClusterConfig.Authentication != nil {
@@ -411,6 +460,7 @@ func (b *NifiConfigMapBuilder) getNifiProperties(ctx context.Context) (string, e
 func NewConfigReconciler(
 	client *client.Client,
 	clusterConfig *nifiv1alpha1.ClusterConfigSpec,
+	image *util.Image,
 	roleGroupInfo reconciler.RoleGroupInfo,
 	config *nifiv1alpha1.ConfigSpec,
 	authentication *security.Authentication,
@@ -419,6 +469,7 @@ func NewConfigReconciler(
 	nifiConfigSecretBuilder := NewNifiConfigBuilder(
 		client,
 		clusterConfig,
+		image,
 		roleGroupInfo,
 		config,
 		authentication,

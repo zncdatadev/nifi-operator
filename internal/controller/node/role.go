@@ -104,6 +104,7 @@ func (r *Reconciler) RegisterResourceWithRoleGroup(
 	configmapReconciler := NewConfigReconciler(
 		r.Client,
 		r.ClusterConfig,
+		r.Image,
 		info,
 		roleGroupConfig,
 		auth,

@@ -1,0 +1,176 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: reporting-task
+spec:
+  # product_version: resolved from PRODUCT_VERSION env var, falls back to 2.4.0
+  bindings:
+    - name: product_version
+      value: (env('PRODUCT_VERSION') || '2.4.0')
+  steps:
+    # ──────────────────────────────────────────────────────────────
+    # Step 1: Apply all resources and wait for the NiFi StatefulSet
+    #         to become ready (up to 10 minutes).
+    # ──────────────────────────────────────────────────────────────
+    - name: deploy nifi with reporting task
+      try:
+        - apply:
+            file: nifi.yaml
+        - assert:
+            timeout: 10m
+            file: nifi-assert.yaml
+      cleanup:
+        - sleep:
+            duration: 30s
+      catch:
+        - describe:
+            apiVersion: nifi.kubedoop.dev/v1alpha1
+            kind: NifiCluster
+            name: reporting-task-nifi
+        - describe:
+            apiVersion: apps/v1
+            kind: StatefulSet
+            name: reporting-task-nifi-node-default
+        - podLogs:
+            selector: app.kubernetes.io/instance=reporting-task-nifi
+
+    # ──────────────────────────────────────────────────────────────
+    # Step 2: Verify cluster health via the NiFi REST API.
+    #         GET /nifi-api/controller/cluster → all nodes CONNECTED.
+    #
+    #         Adapted from Stackable NiFi operator:
+    #           tests/templates/kuttl/smoke_v1/test_nifi.py
+    #           tests/templates/kuttl/smoke_v2/test_nifi.py
+    #
+    #         Works for both NiFi 1.x and 2.x.
+    # ──────────────────────────────────────────────────────────────
+    - name: verify nifi flow
+      try:
+        - script:
+            timeout: 3m
+            env:
+              - name: NAMESPACE
+                value: ($namespace)
+            content: |
+              #!/bin/sh
+              set -e
+
+              POD="reporting-task-nifi-node-default-0"
+
+              echo "=== Copying NiFi flow test script to pod ==="
+              kubectl cp -n "$NAMESPACE" \
+                test_nifi.py "${POD}:/tmp/test_nifi.py" -c node
+
+              echo "=== Verifying NiFi cluster via REST API (localhost) ==="
+              kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
+                python3 /tmp/test_nifi.py \
+                  --host "http://localhost:8088" \
+                  --user admin \
+                  --password admin \
+                  --count 1 \
+                  --timeout 120
+
+              echo "PASS: NiFi cluster is healthy"
+      catch:
+        - podLogs:
+            selector: app.kubernetes.io/instance=reporting-task-nifi
+            container: node
+
+    # ──────────────────────────────────────────────────────────────
+    # Step 3: NiFi 1.x only — wait for the PrometheusReportingTask
+    #         setup Job to complete.
+    #
+    #         NiFi 2.x serves metrics natively; no Job is created.
+    #         The script exits 0 immediately for 2.x.
+    #
+    #         Job name encodes the product version, e.g.:
+    #           reporting-task-nifi-create-reporting-task-1-28-0
+    # ──────────────────────────────────────────────────────────────
+    - name: verify reporting task job (nifi 1.x only)
+      try:
+        - script:
+            timeout: 5m
+            env:
+              - name: NAMESPACE
+                value: ($namespace)
+              - name: PRODUCT_VERSION
+                value: ($product_version)
+            content: |
+              #!/bin/sh
+              set -e
+              case "$PRODUCT_VERSION" in
+                1.*) ;;
+                *)
+                  echo "SKIP: NiFi ${PRODUCT_VERSION} — no reporting-task Job (2.x serves metrics natively)"
+                  exit 0
+                  ;;
+              esac
+              PRODUCT_VERSION_DASHES=$(echo "$PRODUCT_VERSION" | tr '.' '-')
+              JOB_NAME="reporting-task-nifi-create-reporting-task-${PRODUCT_VERSION_DASHES}"
+              echo "=== Waiting for Job: $JOB_NAME ==="
+              kubectl -n "$NAMESPACE" wait "job/${JOB_NAME}" \
+                --for=condition=Complete --timeout=5m
+              echo "PASS: Reporting task Job completed"
+      catch:
+        - describe:
+            apiVersion: batch/v1
+            kind: Job
+        - podLogs:
+            selector: app.kubernetes.io/instance=reporting-task-nifi
+
+    # ──────────────────────────────────────────────────────────────
+    # Step 4: Verify Prometheus metrics are exposed (version-aware).
+    #
+    #   NiFi 1.x — PrometheusReportingTask:
+    #     HTTP  port 8081  /metrics/
+    #     Adapted from: tests/templates/kuttl/smoke_v1/test_nifi_metrics.py
+    #
+    #   NiFi 2.x — native metrics endpoint:
+    #     HTTPS port 9443  /nifi-api/flow/metrics/prometheus  (Bearer auth)
+    #     Adapted from: tests/templates/kuttl/smoke_v2/test_nifi_metrics.py
+    # ──────────────────────────────────────────────────────────────
+    - name: verify nifi prometheus metrics
+      try:
+        - script:
+            timeout: 3m
+            env:
+              - name: NAMESPACE
+                value: ($namespace)
+              - name: PRODUCT_VERSION
+                value: ($product_version)
+            content: |
+              #!/bin/sh
+              set -e
+
+              POD="reporting-task-nifi-node-default-0"
+
+              echo "=== Copying metrics test script to pod ==="
+              kubectl cp -n "$NAMESPACE" \
+                test_nifi_metrics.py "${POD}:/tmp/test_nifi_metrics.py" -c node
+
+              case "$PRODUCT_VERSION" in
+                1.*)
+                  echo "=== NiFi 1.x: checking metrics via HTTP port 8081 ==="
+                  kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
+                    python3 /tmp/test_nifi_metrics.py \
+                      --host localhost \
+                      --port 8081 \
+                      --metric nifi_amount_bytes_read \
+                      --timeout 120
+                  ;;
+                *)
+                  echo "=== NiFi 2.x: checking metrics via HTTP port 8088 ==="
+                  kubectl -n "$NAMESPACE" exec "$POD" -c node -- \
+                    python3 /tmp/test_nifi_metrics.py \
+                      --host localhost \
+                      --port 8088 \
+                      --metric nifi_amount_bytes_read \
+                      --timeout 120
+                  ;;
+              esac
+
+              echo "PASS: Prometheus metrics verified"
+      catch:
+        - podLogs:
+            selector: app.kubernetes.io/instance=reporting-task-nifi
+            container: node
