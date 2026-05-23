@@ -6,11 +6,12 @@ This document describes the standard release process for nifi-operator.
 
 The release process follows a branch-based workflow:
 
-- **Main branch** (`main`): The default development branch where new features and bug fixes are merged.
-- **Release branch** (`release-x.y`): A long-lived branch for a minor version series
-  (e.g., `release-0.4`). Created from `main`, only accepts bug fixes and
-  dependency upgrades, no new features. All release tags are created from this
-  branch to ensure published code is stable and verified.
+- **Main branch** (`main`): The default development branch where new
+  features and bug fixes are merged.
+- **Release branch** (`release-x.y`): A long-lived branch for a minor
+  version series (e.g., `release-0.4`). Created from `main`, only accepts
+  bug fixes and dependency upgrades, no new features. All release tags are
+  created from this branch to ensure published code is stable and verified.
 
 ## How Versioning Works
 
@@ -48,7 +49,9 @@ Create a release branch on the upstream repository from the prepared `main`.
 ```bash
 gh api repos/zncdatadev/nifi-operator/git/refs \
   -f ref=refs/heads/release-0.x \
-  -f sha=$(gh api repos/zncdatadev/nifi-operator/git/ref/heads/main --jq .object.sha)
+  -f sha=$(gh api \
+    repos/zncdatadev/nifi-operator/git/ref/heads/main \
+    --jq .object.sha)
 ```
 
 Then sync locally:
@@ -102,7 +105,8 @@ runs the following jobs:
 - **Markdown Lint** — Lints markdown files under `docs/` and `README.*.md`
 - **Golang Lint** — Runs golangci-lint
 - **Golang Test** — Runs unit tests
-- **Chainsaw Test** — Runs Chainsaw E2E tests across Kubernetes and NiFi versions
+- **Chainsaw Test** — Runs Chainsaw E2E tests across Kubernetes and
+  NiFi versions
 - **Release Image** — Builds and pushes multi-arch Docker image to
   `quay.io/zncdatadev/nifi-operator:<version>`, and signs the image with Cosign
 
@@ -125,7 +129,9 @@ Here is an example of releasing version `0.4.0` on the `release-0.4` branch:
 # Step 2: Create release branch on upstream
 gh api repos/zncdatadev/nifi-operator/git/refs \
   -f ref=refs/heads/release-0.4 \
-  -f sha=$(gh api repos/zncdatadev/nifi-operator/git/ref/heads/main --jq .object.sha)
+  -f sha=$(gh api \
+    repos/zncdatadev/nifi-operator/git/ref/heads/main \
+    --jq .object.sha)
 
 # Sync locally
 git fetch upstream
