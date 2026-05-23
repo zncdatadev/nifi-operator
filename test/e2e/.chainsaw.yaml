@@ -3,7 +3,7 @@ kind: Configuration
 metadata:
   name: e2e-tests
 spec:
-  # Continue testing after failures
+  # Stop testing on first failure
   failFast: false
   # Parallel execution of tests
   parallel: 1

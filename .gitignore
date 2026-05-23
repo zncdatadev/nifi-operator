@@ -40,6 +40,7 @@ cover.out
 
 # ai code local
 .codiumai.toml
-.omc/
+.omc
+.kubeconfig
 
 docker-digests.json

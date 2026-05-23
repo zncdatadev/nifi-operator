@@ -1,0 +1,33 @@
+---
+# Prerequisite secret must be present
+apiVersion: v1
+kind: Secret
+metadata:
+  name: reporting-task-admin-user-secret
+---
+# Prerequisite AuthenticationClass must be present
+apiVersion: authentication.kubedoop.dev/v1alpha1
+kind: AuthenticationClass
+metadata:
+  name: reporting-task-admin-user
+---
+# NifiCluster resource must exist
+apiVersion: nifi.kubedoop.dev/v1alpha1
+kind: NifiCluster
+metadata:
+  name: reporting-task-nifi
+---
+# Auto-generated sensitive key secret must exist
+apiVersion: v1
+kind: Secret
+metadata:
+  name: reporting-task-sensitive-key
+---
+# StatefulSet must exist and have 1 ready replica
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: reporting-task-nifi-node-default
+status:
+  readyReplicas: 1
+  replicas: 1
