@@ -41,3 +41,6 @@ cover.out
 .codiumai.toml
 
 docker-digests.json
+
+# AI worktree
+.worktree/
