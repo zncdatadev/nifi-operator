@@ -44,3 +44,6 @@ cover.out
 .kubeconfig
 
 docker-digests.json
+
+# AI worktree
+.worktree/
