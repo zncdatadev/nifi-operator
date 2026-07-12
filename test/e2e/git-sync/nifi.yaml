@@ -25,7 +25,7 @@ metadata:
   name: nificluster-git-sync
 spec:
   image:
-    productVersion: "2.4.0"
+    productVersion: ($values.product_version)
     pullPolicy: IfNotPresent
   clusterConfig:
     authentication:

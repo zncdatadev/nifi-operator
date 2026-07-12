@@ -39,7 +39,7 @@ spec:
       autoGenerate: true
     listenerClass: cluster-internal
   image:
-    productVersion: ($product_version)
+    productVersion: ($values.product_version)
   nodes:
     roleGroups:
       default:

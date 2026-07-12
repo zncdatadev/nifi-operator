@@ -3,10 +3,11 @@ kind: Test
 metadata:
   name: reporting-task
 spec:
-  # product_version: resolved from PRODUCT_VERSION env var, falls back to 2.4.0
   bindings:
-    - name: product_version
-      value: (env('PRODUCT_VERSION') || '2.4.0')
+    # nifi_version: the deployed product version. Falls back to the operator
+    # default when --values leaves product_version null (PRODUCT_VERSION unset).
+    - name: nifi_version
+      value: ($values.product_version || '2.4.0')
   steps:
     # ──────────────────────────────────────────────────────────────
     # Step 1: Apply all resources and wait for the NiFi StatefulSet
@@ -94,7 +95,7 @@ spec:
               - name: NAMESPACE
                 value: ($namespace)
               - name: PRODUCT_VERSION
-                value: ($product_version)
+                value: ($nifi_version)
             content: |
               #!/bin/sh
               set -e
@@ -137,7 +138,7 @@ spec:
               - name: NAMESPACE
                 value: ($namespace)
               - name: PRODUCT_VERSION
-                value: ($product_version)
+                value: ($nifi_version)
             content: |
               #!/bin/sh
               set -e
