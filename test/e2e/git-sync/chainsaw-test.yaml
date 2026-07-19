@@ -3,7 +3,9 @@ kind: Test
 metadata:
   name: git-sync
 spec:
-  bindings: []
+  bindings:
+    - name: nifi_version
+      value: ($values.product_version)
   steps:
     # ──────────────────────────────────────────────────────────────
     # Step 1: Deploy NiFi cluster with customComponentsGitSync
