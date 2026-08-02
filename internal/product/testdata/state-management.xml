@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<stateManagement>
+    <local-provider>
+        <id>local-provider</id>
+        <class>org.apache.nifi.controller.state.providers.local.WriteAheadLocalStateProvider</class>
+        <property name="Directory">/kubedoop/data/state-repository</property>
+        <property name="Always Sync">false</property>
+        <property name="Partitions">16</property>
+        <property name="Checkpoint Interval">2 mins</property>
+    </local-provider>
+    <cluster-provider>
+        <id>kubernetes-provider</id>
+        <class>org.apache.nifi.kubernetes.state.provider.KubernetesConfigMapStateProvider</class>
+        <property name="ConfigMap Name Prefix">{{ getenv "STACKLET_NAME" }}</property>
+    </cluster-provider>
+</stateManagement>
