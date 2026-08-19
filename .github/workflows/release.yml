@@ -40,6 +40,11 @@ jobs:
 
       - name: Run linter
         uses: golangci/golangci-lint-action@v9
+        with:
+          # Pin the linter version so a new upstream release cannot break the
+          # pipeline without a code change. Keep in sync with the Makefile's
+          # GOLANGCI_LINT_VERSION.
+          version: v2.12.1
 
 
   golang-test:
@@ -66,6 +71,8 @@ jobs:
     strategy:
       matrix:
         k8s-version: [
+          '1.33.7',
+          '1.34.3',
           '1.35.0'
         ]
         product-version: ['2.4.0']
@@ -98,6 +105,32 @@ jobs:
         run: make chainsaw-e2e
 
 
+  check-crds-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Check CRDs sync
+        run: |
+          # Use `make manifests` to generate the CRDs
+          make manifests
+          # Check if the CRDs are in sync with the manifests.
+          # Stage everything first so newly generated (untracked) files are
+          # detected too; plain `git diff` ignores untracked files.
+          git add -A
+          if ! git diff --cached --exit-code; then
+            echo "CRDs are not in sync with the manifests."
+            echo "Please run 'make manifests' to update the CRDs."
+            exit 1
+          fi
+
+
   release-image:
     name: Release Image
     if: ${{ github.repository_owner == 'zncdatadev' }}
@@ -109,6 +142,7 @@ jobs:
       - golang-lint
       - golang-test
       - chainsaw-test
+      - check-crds-sync
     steps:
       - name: Clone the code
         uses: actions/checkout@v6
