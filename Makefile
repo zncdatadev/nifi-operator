@@ -217,7 +217,7 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   [ -n "$$v" ] || { echo "Set ENVTEST_K8S_VERSION manually (k8s.io/api replace has no tag)" >&2; exit 1; }; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
-GOLANGCI_LINT_VERSION ?= v2.8.0
+GOLANGCI_LINT_VERSION ?= v2.12.1
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -338,6 +338,14 @@ setup-chainsaw-e2e: chainsaw docker-build ## Run the chainsaw setup
 	"$(KIND)" --name $(CHAINSAW_CLUSTER) load docker-image "$(IMG)"
 	KUBECONFIG=$(CHAINSAW_KUBECONFIG) $(MAKE) deploy
 
+
+.PHONY: chart-e2e
+chart-e2e: setup-chainsaw-cluster chainsaw docker-build helm-chart-package ## Run e2e tests with Helm chart deployment
+	"$(KIND)" --name $(CHAINSAW_CLUSTER) load docker-image "$(IMG)"
+	"$(HELM)" upgrade --install --create-namespace --namespace $(PROJECT_NAME) \
+		--kubeconfig $(CHAINSAW_KUBECONFIG) --wait $(PROJECT_NAME) \
+		target/charts/$(PROJECT_NAME)-$(VERSION).tgz
+	KUBECONFIG=$(CHAINSAW_KUBECONFIG) $(CHAINSAW) test --config ./test/e2e/.chainsaw.yaml --test-dir ./test/e2e/ --set product_version=$(PRODUCT_VERSION)
 
 .PHONY: chainsaw-e2e
 chainsaw-e2e: ## Run the chainsaw e2e tests
