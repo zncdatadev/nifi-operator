@@ -3,6 +3,18 @@ kind: Configuration
 metadata:
   name: e2e-tests
 spec:
+  # Without this block chainsaw applies its own defaults, and the default
+  # exec timeout is 5s - far too short for the verify scripts here, which chain
+  # several kubectl get/exec/logs calls against a running NiFi node. That showed
+  # up as `signal: killed` on the git-sync suite. Values mirror the other
+  # operators, which all set this explicitly.
+  timeouts:
+    apply: 120s
+    assert: 120s
+    cleanup: 240s
+    delete: 240s
+    error: 10s
+    exec: 120s
   # Stop testing on first failure
   failFast: false
   # Parallel execution of tests
