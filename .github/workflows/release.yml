@@ -196,8 +196,15 @@ jobs:
           # First release detection
           if [[ "$PREVIOUS_TAG" == "$CURRENT_TAG" || -z "$PREVIOUS_TAG" ]]; then
             echo "First release detected - marking all charts as changed"
+            # Every step below passes since_commit straight through to ct, so it
+            # has to be a real revision - leaving it unset makes ct run
+            # `--since ""` and fail with git exit 128. The root commit is the
+            # correct value here: diffing from it reports all charts as changed,
+            # which is exactly what a first release means.
+            ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD | tail -n1)
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "target_branch=main" >> "$GITHUB_OUTPUT"
+            echo "since_commit=$ROOT_COMMIT" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
