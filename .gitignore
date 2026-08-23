@@ -45,5 +45,9 @@ cover.out
 
 docker-digests.json
 
+# helm charts
+# helm package directory
+target
+
 # AI worktree
 .worktree/
