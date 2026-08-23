@@ -57,8 +57,12 @@ type RoleGroupSpec struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas"`
+	// Config carries the role group's workload configuration. It deliberately
+	// has no CRD default: a default stamped here at admission would win the
+	// role -> role group merge, so a role-level setting could never reach the
+	// group. The gracefulShutdownTimeout fallback ("30s") is applied at
+	// consumption time instead.
 	// +kubebuilder:validation:Optional
-	// +default:value={"gracefulShutdownTimeout": "30s"}
 	Config                         *ConfigSpec `json:"config,omitempty"`
 	*commonsv1alpha1.OverridesSpec `json:",inline"`
 	JVMArgumentOverrides           *JVMArgumentOverridesSpec `json:"jvmArgumentOverrides,omitempty"`
@@ -76,8 +80,11 @@ type JVMArgumentOverridesSpec struct {
 }
 
 // NifiClusterStatus defines the observed state of NifiCluster.
+// The embedded GenericClusterStatus carries the framework conditions
+// (Available/Progressing/Degraded/...) and the role-group ledger the orphan
+// cleaner reads; `conditions` keeps its Gen 2 schema shape.
 type NifiClusterStatus struct {
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	commonsv1alpha1.GenericClusterStatus `json:",inline"`
 }
 
 // +kubebuilder:object:root=true

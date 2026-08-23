@@ -1,0 +1,67 @@
+package util
+
+import (
+	"fmt"
+
+	"github.com/zncdatadev/operator-go/pkg/constant"
+)
+
+// Vendored from operator-go v0.12.6 pkg/util/bash.go — removed upstream
+// (#441); upstream #617 closed the restore request as docs-only: native
+// sidecars (KEP-753) supersede the vector shutdown handshake, so these
+// commands should eventually be DROPPED rather than restored. Kept verbatim
+// for Gen 2 rendered-bytes parity. Known latent defects in the original
+// bytes, recorded by upstream #624 and deliberately not fixed here (parity
+// first): unguarded term_child_pid read, wait_for_termination always
+// returning 0, errexit leak. See docs/gen3-migration-design.md §7.
+
+const (
+	// VectorLogDir is the subdirectory of the log directory containing files to
+	// control the Vector instance.
+	VectorLogDir = "_vector/"
+
+	// ShutdownFile signals that Vector should be gracefully shut down.
+	ShutdownFile = "shutdown"
+)
+
+const CommonBashTrapFunctions = `prepare_signal_handlers()
+{
+    unset term_child_pid
+    unset term_kill_needed
+    trap 'handle_term_signal' TERM
+}
+
+handle_term_signal()
+{
+    if [ "${term_child_pid}" ]; then
+        kill -TERM "${term_child_pid}" 2>/dev/null
+    else
+        term_kill_needed="yes"
+    fi
+}
+
+wait_for_termination()
+{
+    set +e
+    term_child_pid=$1
+    if [[ -v term_kill_needed ]]; then
+        kill -TERM "${term_child_pid}" 2>/dev/null
+    fi
+    wait ${term_child_pid} 2>/dev/null
+    trap - TERM
+    wait ${term_child_pid} 2>/dev/null
+    set -e
+}`
+
+// RemoveVectorShutdownFileCommand removes the shutdown file (if it exists)
+// created by CreateVectorShutdownFileCommand. Execute before starting the
+// application.
+func RemoveVectorShutdownFileCommand() string {
+	return fmt.Sprintf("rm -f %s%s%s", constant.KubedoopLogDir, VectorLogDir, ShutdownFile)
+}
+
+// CreateVectorShutdownFileCommand creates the shutdown file for the vector
+// container. Execute after the application terminates.
+func CreateVectorShutdownFileCommand() string {
+	return fmt.Sprintf("mkdir -p %s%s && touch %s%s%s", constant.KubedoopLogDir, VectorLogDir, constant.KubedoopLogDir, VectorLogDir, ShutdownFile)
+}
