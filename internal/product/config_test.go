@@ -60,7 +60,7 @@ func fixture(t *testing.T, name string) string {
 func TestBootstrapConfParity(t *testing.T) {
 	cr := gitSyncCR()
 
-	rendered, err := util.PlainPropertiesMarshaler{}.Marshal(bootstrapConfig(cr, "default"))
+	rendered, err := util.PlainPropertiesMarshaler{}.Marshal(BootstrapConfig(cr, "default", DefaultGracefulShutdownTimeout))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestBootstrapConfParity(t *testing.T) {
 func TestNifiPropertiesParity(t *testing.T) {
 	cr := gitSyncCR()
 
-	rendered, err := util.PlainPropertiesMarshaler{}.Marshal(nifiProperties(cr))
+	rendered, err := util.PlainPropertiesMarshaler{}.Marshal(NifiProperties(cr))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

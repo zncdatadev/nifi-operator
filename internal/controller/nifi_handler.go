@@ -40,15 +40,17 @@ import (
 	"github.com/zncdatadev/nifi-operator/internal/product"
 	"github.com/zncdatadev/nifi-operator/internal/security"
 	nifiutil "github.com/zncdatadev/nifi-operator/internal/util"
-	"github.com/zncdatadev/nifi-operator/internal/version"
 )
 
 // Compile-time proof that NifiCluster wires framework-owned vector.yaml
 // generation (inert until a role group enables the Vector agent).
 var _ reconciler.VectorAggregatorProvider = (*nifiv1alpha1.NifiCluster)(nil)
 
-// RBAC for the resources the SDK GenericReconciler owns on behalf of a NifiCluster,
-// plus the per-CR Role/RoleBinding the RBAC extension creates for NiFi pods.
+// RBAC for the resources the SDK GenericReconciler consumes on behalf of a
+// NifiCluster. This is the OPERATOR's own ClusterRole; the workload's Role/
+// RoleBinding come from GenericReconcilerConfig.WorkloadRBACRules, and RBAC
+// escalation prevention requires this ClusterRole to hold every permission
+// that hook grants (leases, configmaps).
 // Regenerate config/rbac/role.yaml with `make manifests` after editing.
 //
 // +kubebuilder:rbac:groups=nifi.kubedoop.dev,resources=nificlusters,verbs=get;list;watch;create;update;patch;delete
@@ -72,41 +74,28 @@ const (
 
 	// EmptyDirVolumeName backs NiFi's writable conf directory.
 	EmptyDirVolumeName = "empty-dir"
-)
 
-// NifiServiceAccountName returns the per-CR ServiceAccount name for NiFi pods
-// (unchanged from Gen 2: "<cluster>-nifi").
-func NifiServiceAccountName(clusterName string) string {
-	return clusterName + "-nifi"
-}
+	// confSubPath is the empty-dir subPath backing /kubedoop/nifi/conf, and
+	// also the framework's reserved ConfigMap volume name.
+	confSubPath = "config"
+)
 
 // NifiRoleGroupHandler builds NiFi role group resources. The embedded
 // BaseRoleGroupHandler owns the skeleton (ConfigMap from the merged config,
-// headless + client Services, StatefulSet, role-level PDB); the override below
-// adds the NiFi-specific parts: authentication wiring, the gomplate prepare
-// init container, git-sync containers, and the document-style XML config files
-// that cannot flow through the key-value merge pipeline.
+// headless + client Services, StatefulSet, role-level PDB). The role's shape
+// is declared once per pass by DeclareRoles, the product's config is derived
+// per role group by ResolveRoleGroup, and the BuildResources override adds
+// only what neither seam can model: the gomplate prepare init container,
+// git-sync containers, product volumes, and the document-style XML files.
 type NifiRoleGroupHandler struct {
 	*reconciler.BaseRoleGroupHandler[*nifiv1alpha1.NifiCluster]
 }
 
-// NewNifiRoleGroupHandler creates the handler and configures the
-// reconcile-invariant framework defaults. Everything that depends on the CR
-// (TLS-dependent probes, listener class, auth volumes) rides the per-call
-// RoleGroupBuildContext instead.
+// NewNifiRoleGroupHandler creates the handler with its reconcile-invariant
+// collaborators; everything a role is made of is declared per pass by
+// DeclareRoles, with the cr in hand.
 func NewNifiRoleGroupHandler(scheme *runtime.Scheme) *NifiRoleGroupHandler {
-	base := reconciler.NewBaseRoleGroupHandler[*nifiv1alpha1.NifiCluster](defaultImage(), scheme)
-
-	// Opting into the product name lets the framework resolve spec.image every
-	// reconcile; an operator upgrade moves clusters onto the co-released image.
-	base.ProductName = nifiv1alpha1.DefaultProductName
-	base.ImageDefaults = commonsv1alpha1.ImageSpec{
-		Repo:            nifiv1alpha1.DefaultRepository,
-		ProductVersion:  nifiv1alpha1.DefaultProductVersion,
-		KubedoopVersion: version.BuildVersion,
-	}
-
-	base.MainContainerName = MainContainerName
+	base := reconciler.NewBaseRoleGroupHandler[*nifiv1alpha1.NifiCluster](scheme)
 
 	// nifi.properties and bootstrap.conf are plain sorted key=value files whose
 	// bytes (and embedded gomplate templates) must not be Java-escaped, so both
@@ -128,19 +117,132 @@ func NewNifiRoleGroupHandler(scheme *runtime.Scheme) *NifiRoleGroupHandler {
 		AllowPrivilegeEscalation: ptrTo(false),
 	}, nil)
 
-	base.SetRoleContainerPorts(nifiv1alpha1.RoleName, product.Ports)
-	base.SetRoleServicePorts(nifiv1alpha1.RoleName, servicePorts())
-
-	// Peers must resolve each other's DNS before readiness for cluster
-	// formation (the headless Service is new in Gen 3; Gen 2 intended but never
-	// achieved per-pod DNS).
-	base.PublishNotReadyAddresses = true
-
 	return &NifiRoleGroupHandler{BaseRoleGroupHandler: base}
 }
 
+// DeclareRoles implements reconciler.RoleProvider: the "node" role's whole
+// shape, produced once per reconcile pass with the cr in hand — which is what
+// lets the TLS-dependent probe port and the authenticator env be computed here
+// instead of living in process-wide handler state.
+func (h *NifiRoleGroupHandler) DeclareRoles(
+	ctx context.Context, c client.Client, cr *nifiv1alpha1.NifiCluster,
+) (reconciler.RoleCatalog, error) {
+	clusterConfig := cr.Spec.ClusterConfig
+	if clusterConfig == nil {
+		return nil, fmt.Errorf("spec.clusterConfig must not be nil")
+	}
+
+	auth, err := resolveAuthentication(ctx, c, cr)
+	if err != nil {
+		return nil, err
+	}
+
+	webPort := intstr.FromString("http")
+	if clusterConfig.Tls != nil {
+		webPort = intstr.FromString("https")
+	}
+
+	decl := reconciler.RoleDeclaration{
+		MainContainerName: MainContainerName,
+		ContainerPorts:    product.Ports,
+		ServicePorts:      servicePorts(),
+
+		// The Gen 2 entrypoint: bash trap functions around bin/nifi.sh. Args
+		// carry the user's cliOverrides (none by default).
+		Command: []string{"/bin/bash", "-x", "-euo", "pipefail", "-c", mainContainerScript()},
+
+		// Gen 2 probes: startup gives NiFi up to 20 minutes to open the web
+		// port, liveness recycles a wedged process. Readiness parity (none) is
+		// restored in BuildResources — a nil declaration keeps the framework's
+		// generated probe.
+		LivenessProbe: &corev1.Probe{
+			FailureThreshold:    30,
+			InitialDelaySeconds: 10,
+			PeriodSeconds:       10,
+			SuccessThreshold:    1,
+			TimeoutSeconds:      3,
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{Port: webPort},
+			},
+		},
+		StartupProbe: &corev1.Probe{
+			FailureThreshold:    120,
+			InitialDelaySeconds: 10,
+			PeriodSeconds:       10,
+			SuccessThreshold:    1,
+			TimeoutSeconds:      3,
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{Port: webPort},
+			},
+		},
+
+		// Peers must resolve each other's DNS before readiness for cluster
+		// formation.
+		PublishNotReadyAddresses: true,
+
+		// Unset preserves the Gen 2 default exposure (external-unstable).
+		ListenerClass: listenerClassFor(clusterConfig),
+
+		// POD_NAME/STACKLET_NAME plus the ZooKeeper and authenticator wiring;
+		// valueFrom entries can only ride the declaration.
+		Env: containerEnv(cr, auth),
+
+		// The consumption-time fallback Gen 2 hardcoded; folded beneath the
+		// CR's role and role-group levels, so any user value wins.
+		ConfigDefaults: &nifiConfigDefaults,
+	}
+
+	return reconciler.RoleCatalog{
+		nifiv1alpha1.RoleName: decl,
+	}, nil
+}
+
+// nifiConfigDefaults is the product's role-config default layer, folded
+// beneath the CR's role and role-group levels by the framework.
+var nifiConfigDefaults = commonsv1alpha1.RoleGroupConfigSpec{
+	GracefulShutdownTimeout: ptrTo(product.DefaultGracefulShutdownTimeout),
+}
+
+// ResolveRoleGroup implements reconciler.RoleGroupResolver: the product's
+// derived configuration for one role group, folded beneath the user's
+// overrides. NiFi's config files are computed here (the authenticator's extra
+// keys need the API read this seam provides).
+func (h *NifiRoleGroupHandler) ResolveRoleGroup(
+	ctx context.Context, c client.Client, cr *nifiv1alpha1.NifiCluster,
+	rg *reconciler.RoleGroupBuildContext,
+) (*reconciler.Contribution, error) {
+	props := product.NifiProperties(cr)
+
+	auth, err := resolveAuthentication(ctx, c, cr)
+	if err != nil {
+		return nil, err
+	}
+	if auth != nil {
+		for k, v := range auth.ExtendNifiProperties() {
+			props[k] = v
+		}
+	}
+
+	return &reconciler.Contribution{
+		ConfigOverrides: map[string]map[string]string{
+			"bootstrap.conf":  product.BootstrapConfig(cr, rg.RoleGroupName, gracefulShutdownTimeout(rg)),
+			"nifi.properties": props,
+		},
+	}, nil
+}
+
+// gracefulShutdownTimeout reads the folded config (declaration default < role
+// < role group); Gen 2 wrote the raw duration string into bootstrap.conf.
+func gracefulShutdownTimeout(rg *reconciler.RoleGroupBuildContext) string {
+	if effective := rg.EffectiveConfig(); effective != nil &&
+		effective.GracefulShutdownTimeout != nil && *effective.GracefulShutdownTimeout != "" {
+		return *effective.GracefulShutdownTimeout
+	}
+	return product.DefaultGracefulShutdownTimeout
+}
+
 // BuildResources delegates the skeleton to the framework, then applies the
-// NiFi-specific pieces.
+// NiFi-specific pieces neither the declaration nor the resolver can express.
 func (h *NifiRoleGroupHandler) BuildResources(
 	ctx context.Context,
 	k8sClient client.Client,
@@ -152,15 +254,9 @@ func (h *NifiRoleGroupHandler) BuildResources(
 		return nil, fmt.Errorf("spec.clusterConfig must not be nil")
 	}
 
-	// Resolve authentication once per build (Gen 2 resolved it twice per
-	// reconcile). nil when the CR declares none.
-	var auth *security.Authentication
-	if clusterConfig.Authentication != nil {
-		var err error
-		auth, err = security.NewAuthentication(ctx, k8sClient, cr.GetName(), clusterConfig.Authentication)
-		if err != nil {
-			return nil, fmt.Errorf("resolving authentication: %w", err)
-		}
+	auth, err := resolveAuthentication(ctx, k8sClient, cr)
+	if err != nil {
+		return nil, err
 	}
 
 	gitSync, err := gitsync.NewGitSyncResources(clusterConfig.CustomComponentsGitSync)
@@ -168,33 +264,17 @@ func (h *NifiRoleGroupHandler) BuildResources(
 		return nil, fmt.Errorf("building git-sync resources: %w", err)
 	}
 
-	// Resolve the image once and declare it on the context, so the main
-	// container, the prepare init container and the sidecar propagation all
-	// agree on the same reference.
-	image, err := cr.GetSpec().Image.ResolveImage(h.ProductName, h.ImageDefaults)
-	if err != nil {
-		return nil, fmt.Errorf("resolving image: %w", err)
-	}
-	buildCtx.Image = image
-
 	// Init containers ride the framework's sidecar channel (one-shot static
 	// providers, injected in name order within the default phase — the Gen 2
-	// rendered order). Direct pod mutation would race the Vector provider's
-	// phase ordering.
+	// rendered order). The prepare container runs on the resolved image the
+	// reconciler computed for this role group.
 	enabled := &sidecar.SidecarConfig{Enabled: true}
 	buildCtx.SidecarManager.Register(
-		sidecar.NewStaticContainerProvider(h.prepareContainer(cr, buildCtx, auth, image)), enabled)
+		sidecar.NewStaticContainerProvider(
+			h.prepareContainer(cr, buildCtx, auth, buildCtx.ResolvedImage.Reference)), enabled)
 	for i := range gitSync.GitSyncInitContainers {
 		buildCtx.SidecarManager.Register(
 			sidecar.NewStaticContainerProvider(gitSync.GitSyncInitContainers[i]), enabled)
-	}
-
-	// Per-CR intent, declared before Build.
-	buildCtx.ListenerClass = listenerClassFor(clusterConfig)
-	cliArgs := buildCtx.MergedConfig.CliArgs
-	buildCtx.MainContainerCustomizer = func(c *corev1.Container) error {
-		h.customizeMainContainer(c, cr, auth, gitSync, cliArgs)
-		return nil
 	}
 
 	resources, err := h.BaseRoleGroupHandler.BuildResources(ctx, k8sClient, cr, buildCtx)
@@ -219,96 +299,48 @@ func (h *NifiRoleGroupHandler) BuildResources(
 	}
 
 	if resources.StatefulSet != nil {
-		h.finishStatefulSet(resources.StatefulSet, cr, auth, gitSync)
+		h.finishStatefulSet(resources.StatefulSet, auth, gitSync)
 	}
 
 	return resources, nil
 }
 
-// customizeMainContainer reshapes the framework-assembled primary container
-// into the Gen 2 "node" container: bash entrypoint with trap functions, the
-// product env set, NiFi's writable conf mount, git-sync content mounts, and
-// the Gen 2 startup/liveness probes (the framework's TCP readiness probe on
-// the web port is kept — Gen 2 had none, which made rolling updates blind).
-func (h *NifiRoleGroupHandler) customizeMainContainer(
-	c *corev1.Container,
-	cr *nifiv1alpha1.NifiCluster,
-	auth *security.Authentication,
-	gitSync *gitsync.GitSyncResources,
-	cliArgs []string,
-) {
-	clusterConfig := cr.Spec.ClusterConfig
-
-	if len(cliArgs) > 0 {
-		// Gen 2 cliOverrides semantics: the override replaces the entrypoint.
-		c.Command = slices.Clone(cliArgs)
-		c.Args = nil
-	} else {
-		c.Command = []string{"/bin/bash", "-x", "-euo", "pipefail", "-c"}
-		c.Args = []string{mainContainerScript()}
-	}
-
-	c.Env = append(c.Env, containerEnv(cr, auth)...)
-
-	c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
-		Name:      EmptyDirVolumeName,
-		MountPath: product.NifiConfigDir,
-		SubPath:   "config",
-		ReadOnly:  false,
-	})
-	if auth != nil {
-		c.VolumeMounts = append(c.VolumeMounts, auth.GetVolumeMounts()...)
-	}
-	c.VolumeMounts = append(c.VolumeMounts, gitSync.GitSyncVolumeMounts...)
-
-	// Gen 2 parity: no readiness probe. The framework's default TCP readiness
-	// on the web port moves the moment readyReplicas reaches the spec — the
-	// e2e flow-verification budget (unchanged, it is the acceptance gate) is
-	// calibrated against pods that are Ready at container start. Introducing a
-	// readiness probe is a behavior change for a separate, verified PR.
-	c.ReadinessProbe = nil
-
-	webPort := intstr.FromString("http")
-	if clusterConfig.Tls != nil {
-		webPort = intstr.FromString("https")
-	}
-	c.LivenessProbe = &corev1.Probe{
-		FailureThreshold:    30,
-		InitialDelaySeconds: 10,
-		PeriodSeconds:       10,
-		SuccessThreshold:    1,
-		TimeoutSeconds:      3,
-		ProbeHandler: corev1.ProbeHandler{
-			TCPSocket: &corev1.TCPSocketAction{Port: webPort},
-		},
-	}
-	c.StartupProbe = &corev1.Probe{
-		FailureThreshold:    120,
-		InitialDelaySeconds: 10,
-		PeriodSeconds:       10,
-		SuccessThreshold:    1,
-		TimeoutSeconds:      3,
-		ProbeHandler: corev1.ProbeHandler{
-			TCPSocket: &corev1.TCPSocketAction{Port: webPort},
-		},
-	}
-}
-
-// finishStatefulSet applies the pod-level pieces the container customizer
-// cannot reach: the git-sync sidecar containers, the product volumes, and
-// image pull secrets. Init containers are injected by the sidecar channel.
+// finishStatefulSet applies the pod-level Gen 2 parity pieces: the git-sync
+// sidecar containers (regular containers, name-sorted rendering order), the
+// product volumes and main-container mounts, and the removal of the generated
+// readiness probe (Gen 2 had none, and the e2e flow-verification budget — the
+// unmodifiable acceptance gate — is calibrated against pods that are Ready at
+// container start; RoleDeclaration offers no way to declare "no readiness").
 func (h *NifiRoleGroupHandler) finishStatefulSet(
 	sts *appsv1.StatefulSet,
-	cr *nifiv1alpha1.NifiCluster,
 	auth *security.Authentication,
 	gitSync *gitsync.GitSyncResources,
 ) {
 	podSpec := &sts.Spec.Template.Spec
 
+	for i := range podSpec.Containers {
+		if podSpec.Containers[i].Name != MainContainerName {
+			continue
+		}
+		node := &podSpec.Containers[i]
+		node.ReadinessProbe = nil
+		node.VolumeMounts = append(node.VolumeMounts, corev1.VolumeMount{
+			Name:      EmptyDirVolumeName,
+			MountPath: product.NifiConfigDir,
+			SubPath:   confSubPath,
+			ReadOnly:  false,
+		})
+		if auth != nil {
+			node.VolumeMounts = append(node.VolumeMounts, auth.GetVolumeMounts()...)
+		}
+		node.VolumeMounts = append(node.VolumeMounts, gitSync.GitSyncVolumeMounts...)
+		break
+	}
+
 	// git-sync's continuous sidecars stay regular containers (Gen 2 parity);
 	// sorting Containers by name reproduces the Gen 2 rendered order
-	// (git-sync-0 before node). InitContainers are NOT sorted: their order is
-	// the sidecar channel's phase ordering, which the Vector provider relies on.
+	// (git-sync-0 before node). InitContainers keep the sidecar channel's
+	// phase ordering.
 	podSpec.Containers = append(podSpec.Containers, gitSync.GitSyncContainers...)
 	slices.SortStableFunc(podSpec.Containers, func(a, b corev1.Container) int {
 		return strings.Compare(a.Name, b.Name)
@@ -324,12 +356,28 @@ func (h *NifiRoleGroupHandler) finishStatefulSet(
 		podSpec.Volumes = append(podSpec.Volumes, auth.GetVolumes()...)
 	}
 	podSpec.Volumes = append(podSpec.Volumes, gitSync.GitSyncVolumes...)
+}
 
-	if cr.Spec.Image != nil && cr.Spec.Image.PullSecretName != "" {
-		podSpec.ImagePullSecrets = append(podSpec.ImagePullSecrets, corev1.LocalObjectReference{
-			Name: cr.Spec.Image.PullSecretName,
-		})
+func setIfAbsent(data map[string]string, key string, value func() string) {
+	if _, exists := data[key]; !exists {
+		data[key] = value()
 	}
+}
+
+// resolveAuthentication resolves the CR's authentication classes; nil when the
+// CR declares none. Reads go through the informer cache, so calling this from
+// each seam that needs it is cheap and keeps the shared handler stateless.
+func resolveAuthentication(
+	ctx context.Context, c client.Client, cr *nifiv1alpha1.NifiCluster,
+) (*security.Authentication, error) {
+	if cr.Spec.ClusterConfig == nil || cr.Spec.ClusterConfig.Authentication == nil {
+		return nil, nil
+	}
+	auth, err := security.NewAuthentication(ctx, c, cr.GetName(), cr.Spec.ClusterConfig.Authentication)
+	if err != nil {
+		return nil, fmt.Errorf("resolving authentication: %w", err)
+	}
+	return auth, nil
 }
 
 // prepareContainer builds the init container that copies the mounted config
@@ -342,14 +390,14 @@ func (h *NifiRoleGroupHandler) prepareContainer(
 ) corev1.Container {
 	volumeMounts := []corev1.VolumeMount{
 		{
-			Name:      "config",
+			Name:      confSubPath,
 			MountPath: constant.KubedoopConfigDirMount,
 			ReadOnly:  true,
 		},
 		{
 			Name:      EmptyDirVolumeName,
 			MountPath: product.NifiConfigDir,
-			SubPath:   "config",
+			SubPath:   confSubPath,
 			ReadOnly:  false,
 		},
 	}
@@ -360,7 +408,7 @@ func (h *NifiRoleGroupHandler) prepareContainer(
 	return corev1.Container{
 		Name:            "prepare",
 		Image:           image,
-		ImagePullPolicy: h.ImagePullPolicy,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/bin/bash", "-x", "-euo", "pipefail", "-c"},
 		Args:            []string{prepareContainerScript(cr, buildCtx, auth)},
 		Env:             containerEnv(cr, auth),
@@ -373,9 +421,8 @@ func (h *NifiRoleGroupHandler) prepareContainer(
 	}
 }
 
-// prepareContainerScript renders the Gen 2 prepare script. NODE_ADDRESS now
-// points at the headless Service (Gen 2 pointed at a non-headless Service, so
-// the per-pod FQDN never resolved — reviewed intentional diff).
+// prepareContainerScript renders the Gen 2 prepare script. NODE_ADDRESS points
+// at the headless Service so the per-pod FQDN resolves.
 func prepareContainerScript(
 	cr *nifiv1alpha1.NifiCluster,
 	buildCtx *reconciler.RoleGroupBuildContext,
@@ -496,24 +543,9 @@ func servicePorts() []corev1.ServicePort {
 	return ports
 }
 
-// defaultImage is the operator's static fallback image; spec.image resolved
-// with ImageDefaults overrides it per reconcile.
-func defaultImage() string {
-	return fmt.Sprintf("%s/%s:%s-kubedoop%s",
-		nifiv1alpha1.DefaultRepository,
-		nifiv1alpha1.DefaultProductName,
-		nifiv1alpha1.DefaultProductVersion,
-		version.BuildVersion,
-	)
-}
-
-func setIfAbsent(data map[string]string, key string, value func() string) {
-	if _, exists := data[key]; !exists {
-		data[key] = value()
-	}
-}
-
 func ptrTo[T any](v T) *T { return &v }
 
-// Ensure interface implementation.
-var _ reconciler.RoleGroupHandler[*nifiv1alpha1.NifiCluster] = &NifiRoleGroupHandler{}
+var (
+	_ reconciler.RoleGroupHandler[*nifiv1alpha1.NifiCluster] = &NifiRoleGroupHandler{}
+	_ reconciler.RoleProvider[*nifiv1alpha1.NifiCluster]     = &NifiRoleGroupHandler{}
+)

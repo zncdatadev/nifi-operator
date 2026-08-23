@@ -9,7 +9,6 @@
 package product
 
 import (
-	"context"
 	"fmt"
 	"path"
 	"regexp"
@@ -17,12 +16,9 @@ import (
 	"strconv"
 	"strings"
 
-	commonsv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/commons/v1alpha1"
 	"github.com/zncdatadev/operator-go/pkg/constant"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
-	"github.com/zncdatadev/nifi-operator/internal/security"
 	"github.com/zncdatadev/nifi-operator/internal/util"
 )
 
@@ -83,47 +79,18 @@ func ReportingTaskEnabled(cr *nifiv1alpha1.NifiCluster) bool {
 		strings.HasPrefix(ProductVersion(cr), "1.")
 }
 
-// ComputeConfig is the framework ProductConfig hook: it contributes
-// nifi.properties and bootstrap.conf as the lowest merge layer. The ctx and
-// client exist for the authenticator-contributed keys (the OIDC discovery URL
-// needs the AuthenticationClass object), so they flow through the same seam as
-// everything else and any user override still wins.
-func ComputeConfig(
-	ctx context.Context,
-	c client.Client,
-	cr *nifiv1alpha1.NifiCluster,
-	roleName, roleGroupName string,
-) (*commonsv1alpha1.OverridesSpec, error) {
-	props := nifiProperties(cr)
-
-	if cr.Spec.ClusterConfig != nil && cr.Spec.ClusterConfig.Authentication != nil {
-		auth, err := security.NewAuthentication(ctx, c, cr.GetName(), cr.Spec.ClusterConfig.Authentication)
-		if err != nil {
-			return nil, fmt.Errorf("resolving authentication: %w", err)
-		}
-		for k, v := range auth.ExtendNifiProperties() {
-			props[k] = v
-		}
-	}
-
-	return &commonsv1alpha1.OverridesSpec{
-		ConfigOverrides: map[string]map[string]string{
-			"bootstrap.conf":  bootstrapConfig(cr, roleGroupName),
-			"nifi.properties": props,
-		},
-	}, nil
-}
-
-// bootstrapConfig renders the bootstrap.conf key set. jvmArgumentOverrides
-// (dead in Gen 2, activated here) become numbered java.arg.N entries.
-func bootstrapConfig(cr *nifiv1alpha1.NifiCluster, roleGroupName string) map[string]string {
+// BootstrapConfig renders the bootstrap.conf key set. jvmArgumentOverrides
+// (dead in Gen 2, activated here) become numbered java.arg.N entries. The
+// graceful shutdown timeout comes from the folded role config (the caller
+// reads it off the build context).
+func BootstrapConfig(cr *nifiv1alpha1.NifiCluster, roleGroupName, gracefulShutdownTimeout string) map[string]string {
 	config := map[string]string{
 		"java":                      "java",
 		"run.as":                    "",
 		"preserve.environment":      propFalse,
 		"lib.dir":                   "./lib",
 		"conf.dir":                  "./conf",
-		"graceful.shutdown.seconds": gracefulShutdownTimeout(cr, roleGroupName),
+		"graceful.shutdown.seconds": gracefulShutdownTimeout,
 	}
 
 	for i, arg := range mergedJVMArguments(cr, roleGroupName) {
@@ -131,25 +98,6 @@ func bootstrapConfig(cr *nifiv1alpha1.NifiCluster, roleGroupName string) map[str
 	}
 
 	return config
-}
-
-// gracefulShutdownTimeout resolves the merged config.gracefulShutdownTimeout
-// (role group wins over role; CRD default as fallback). Gen 2 wrote the raw
-// duration string, so this does too.
-func gracefulShutdownTimeout(cr *nifiv1alpha1.NifiCluster, roleGroupName string) string {
-	nodes := cr.Spec.Nodes
-	if nodes == nil {
-		return DefaultGracefulShutdownTimeout
-	}
-	if rg, ok := nodes.RoleGroups[roleGroupName]; ok {
-		if rg.Config != nil && rg.Config.RoleGroupConfigSpec != nil && rg.Config.GracefulShutdownTimeout != nil && *rg.Config.GracefulShutdownTimeout != "" {
-			return *rg.Config.GracefulShutdownTimeout
-		}
-	}
-	if nodes.Config != nil && nodes.Config.RoleGroupConfigSpec != nil && nodes.Config.GracefulShutdownTimeout != nil && *nodes.Config.GracefulShutdownTimeout != "" {
-		return *nodes.Config.GracefulShutdownTimeout
-	}
-	return DefaultGracefulShutdownTimeout
 }
 
 // mergedJVMArguments folds the role-level and role-group-level
@@ -204,9 +152,10 @@ func mergedJVMArguments(cr *nifiv1alpha1.NifiCluster, roleGroupName string) []st
 	return filtered
 }
 
-// nifiProperties renders the nifi.properties key set (auth-independent part;
-// the handler merges the authenticator's extra keys, which need an API read).
-func nifiProperties(cr *nifiv1alpha1.NifiCluster) map[string]string {
+// NifiProperties renders the nifi.properties key set (auth-independent part;
+// the handler's role group resolver merges the authenticator's extra keys,
+// which need an API read).
+func NifiProperties(cr *nifiv1alpha1.NifiCluster) map[string]string {
 	clusterConfig := cr.Spec.ClusterConfig
 	enableTls := clusterConfig.Tls != nil
 

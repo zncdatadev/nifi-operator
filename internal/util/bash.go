@@ -6,11 +6,14 @@ import (
 	"github.com/zncdatadev/operator-go/pkg/constant"
 )
 
-// TODO(operator-go): vendored from operator-go v0.12.6 pkg/util/bash.go —
-// removed upstream (#441) with no replacement, while the Vector sidecar still
-// enforces the shutdown-file contract these commands implement. The rendered
-// main-container args are part of the Gen 2 parity contract, so the byte
-// content must not change. Restore tracked in docs/gen3-migration-design.md §7.
+// Vendored from operator-go v0.12.6 pkg/util/bash.go — removed upstream
+// (#441); upstream #617 closed the restore request as docs-only: native
+// sidecars (KEP-753) supersede the vector shutdown handshake, so these
+// commands should eventually be DROPPED rather than restored. Kept verbatim
+// for Gen 2 rendered-bytes parity. Known latent defects in the original
+// bytes, recorded by upstream #624 and deliberately not fixed here (parity
+// first): unguarded term_child_pid read, wait_for_termination always
+// returning 0, errexit leak. See docs/gen3-migration-design.md §7.
 
 const (
 	// VectorLogDir is the subdirectory of the log directory containing files to

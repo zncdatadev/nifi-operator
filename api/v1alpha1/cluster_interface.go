@@ -64,6 +64,7 @@ func (s *NifiClusterSpec) ToGenericSpec() *commonsv1alpha1.GenericClusterSpec {
 			Repo:            s.Image.Repo,
 			ProductVersion:  s.Image.ProductVersion,
 			KubedoopVersion: s.Image.KubedoopVersion,
+			PullSecretName:  s.Image.PullSecretName,
 		}
 		if s.Image.PullPolicy != nil {
 			image.PullPolicy = *s.Image.PullPolicy

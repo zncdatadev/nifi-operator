@@ -6,7 +6,7 @@ godebug default=go1.24
 
 require (
 	github.com/onsi/ginkgo/v2 v2.28.3
-	github.com/zncdatadev/operator-go v0.12.7-0.20260802145045-0ec90d7f0f53
+	github.com/zncdatadev/operator-go v0.12.7-0.20260818060857-e8a949521429
 	k8s.io/api v0.35.4
 	k8s.io/apimachinery v0.35.4
 	k8s.io/client-go v0.35.4

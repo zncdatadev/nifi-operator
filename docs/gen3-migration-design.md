@@ -107,6 +107,13 @@ Registered on `common.NewExtensionRegistry[*NifiCluster]()`:
 Breaking (needs the documented manual migration for live clusters —
 `kubectl delete sts --cascade=orphan`, §8):
 
+0. **Workload ServiceAccount/Role/RoleBinding renamed** by operator-go #616:
+   the framework derives `nificluster-<cluster>` (kind-prefixed, not
+   configurable) and maintains the Role/RoleBinding itself via
+   `WorkloadRBACRules`. The Gen 2 `<cluster>-nifi` objects are left behind on
+   upgrade and should be deleted manually; pods move to the derived SA on the
+   next rolling restart.
+
 1. **STS selector labels**: Gen 2 `{instance, name=nificluster,
    managed-by=nifi.kubedoop.dev, component, role-group}` → Gen 3 framework set
    `{instance, component, managed-by=operator-go, role-group marker}`. The
@@ -204,6 +211,33 @@ Rejected after review (kept product-side, with the framework's own seams):
 Adopted mid-migration: operator-go #591 (`ProductConfig` gained ctx/client +
 error) — the auth-derived nifi.properties keys now flow through the seam
 instead of a hand-rolled merge; pin moved 5edf2ee → 0ec90d7.
+
+Second adoption round (pin 0ec90d7 → e8a9495, post-#616/#632):
+
+- **#597 was implemented upstream as #616** (`WorkloadRBACRules` + derived
+  ServiceAccount): `internal/extensions/rbac.go` deleted; the SA rename is
+  intentional-diff #0.
+- **#596 answered by #617 with docs, deliberately no API**: native sidecars
+  (KEP-753) supersede the vector shutdown handshake, so the shutdown-file
+  commands should eventually be dropped rather than restored; `IndentTab4Spaces`
+  and the trap functions stay product-vendored. Upstream #624's commit message
+  also records three latent defects in the original trap-function bytes
+  (unguarded `term_child_pid` read, `wait_for_termination` always returning 0,
+  `errexit` leak) — kept verbatim here for parity, tracked as a follow-up.
+- **#598 answered by #620 with docs + pinned apply-rule specs, no exported
+  helper**: the reporting-task extension keeps its own create-only ensure.
+- **#632 (declare/fold/derive)**: the handler now implements
+  `RoleProvider.DeclareRoles` (ports, entrypoint Command, probes, env incl.
+  valueFrom, listener class, the "30s" gracefulShutdownTimeout as a declared
+  config default) and `RoleGroupResolver` (nifi.properties/bootstrap.conf +
+  auth keys); `ImageResolution` moves image policy to the reconciler config.
+  Rendered deltas: the main container's script moves from args into command
+  (declaration carries Command; args now carry the user's cliOverrides, whose
+  Gen 2 replace-the-command semantics are gone), and the framework renders
+  imagePullSecrets from `spec.image.pullSecretName` (#622 — the field was dead
+  since the commons ImageSpec migration; the bridge now forwards it).
+- The generated readiness probe is stripped post-build again (RoleDeclaration
+  offers no "no readiness" declaration; nil keeps the generated probe).
 
 Blockers found: none — every gap had a supported workaround.
 

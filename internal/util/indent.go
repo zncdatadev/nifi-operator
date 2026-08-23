@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// TODO(operator-go): vendored from operator-go v0.12.6 pkg/util/code.go —
-// removed upstream (#441). The indentation of rendered script/XML content is
-// part of the Gen 2 parity contract. Restore tracked in
-// docs/gen3-migration-design.md §7.
+// Vendored from operator-go v0.12.6 pkg/util/code.go — removed upstream
+// (#441); upstream #617 recorded the removal as permanent (no framework
+// replacement). The indentation of rendered script/XML content is part of the
+// Gen 2 parity contract. See docs/gen3-migration-design.md §7.
 
 var reTab = regexp.MustCompile(`(^|\n)\t+`)
 
