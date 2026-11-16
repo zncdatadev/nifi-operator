@@ -3,11 +3,9 @@ package security
 import (
 	"fmt"
 	"net/url"
-	"path"
 	"strings"
 
 	authv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/authentication/v1alpha1"
-	"github.com/zncdatadev/operator-go/pkg/config/properties"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -54,7 +52,7 @@ func (a *oidcAuthenticator) GetVolumes() []corev1.Volume {
 			Name: NifiAdminUsername,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName: oidcAdminPasswordSecretname(a.clusterName),
+					SecretName: OidcAdminPasswordSecretName(a.clusterName),
 					Items: []corev1.KeyToPath{
 						{
 							Key:  NifiAdminUsername,
@@ -81,12 +79,10 @@ func (a *oidcAuthenticator) GetVolumeMounts() []corev1.VolumeMount {
 	return volumeMounts
 }
 
-func (a *oidcAuthenticator) ExtendNifiProperties() *properties.Properties {
-
+func (a *oidcAuthenticator) ExtendNifiProperties() map[string]string {
 	scopes := a.provider.Scopes
 	scopes = append(scopes, a.config.ExtraScopes...)
 
-	cfg := properties.NewProperties()
 	issuer := url.URL{
 		Scheme: "http",
 		Host:   a.provider.Hostname,
@@ -97,14 +93,16 @@ func (a *oidcAuthenticator) ExtendNifiProperties() *properties.Properties {
 		issuer.Host = fmt.Sprintf("%s:%d", a.provider.Hostname, a.provider.Port)
 	}
 
-	cfg.Add("nifi.security.user.oidc.discovery.url", issuer.String())
-	cfg.Add("nifi.security.user.oidc.client.id", `{{ getenv "OIDC_CLIENT_ID" }}`)
-	cfg.Add("nifi.security.user.oidc.client.secret", `{{ getenv "OIDC_CLIENT_SECRET" }}`)
-	cfg.Add("nifi.security.user.oidc.extra.scopes", strings.Join(scopes, ","))
-	cfg.Add("nifi.security.user.oidc.claim.identifying.user", a.provider.PrincipalClaim)
-	// TODO: add oidc tls config
-	return cfg
+	return map[string]string{
+		"nifi.security.user.oidc.discovery.url":          issuer.String(),
+		"nifi.security.user.oidc.client.id":              `{{ getenv "OIDC_CLIENT_ID" }}`,
+		"nifi.security.user.oidc.client.secret":          `{{ getenv "OIDC_CLIENT_SECRET" }}`,
+		"nifi.security.user.oidc.extra.scopes":           strings.Join(scopes, ","),
+		"nifi.security.user.oidc.claim.identifying.user": a.provider.PrincipalClaim,
+		// TODO: add oidc tls config
+	}
 }
+
 func (a *oidcAuthenticator) GetInitArgs() string {
 	args := `
 export NIFI_ADMIN_PASSWORD="$(python3 -c 'import bcrypt; print(bcrypt.hashpw(open("` + getAdminPasswordMountDir() + `", "rb").read().strip(), bcrypt.gensalt()).decode("utf-8"), end="")')"
@@ -113,10 +111,6 @@ export NIFI_ADMIN_PASSWORD="$(python3 -c 'import bcrypt; print(bcrypt.hashpw(ope
 	return args
 }
 
-func (a *oidcAuthenticator) GetLoginIdentiryProvider() string {
+func (a *oidcAuthenticator) GetLoginIdentityProvider() string {
 	return getSingleUserLoginIdentityProvider()
-}
-
-func getAdminPasswordMountDir() string {
-	return path.Join(UserMountDir, NifiAdminUsername)
 }

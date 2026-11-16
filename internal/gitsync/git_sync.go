@@ -1,8 +1,10 @@
-package common
+package gitsync
 
 import (
 	"fmt"
+	"maps"
 	"path"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -168,12 +170,14 @@ func buildGitSyncArgs(gs *nifiv1alpha1.GitSyncSpec, oneTime bool) []string {
 	// Add git-config for safe.directory
 	args = append(args, "--git-config=safe.directory:"+gitSyncRootDir)
 
-	// Add user-supplied git-sync config (filter out --git-config as we handle it above)
-	for k, v := range gs.GitSyncConfig {
+	// Add user-supplied git-sync config in sorted key order so the rendered
+	// pod template is stable across reconciles (map iteration order is not).
+	// Filter out flags handled above.
+	for _, k := range slices.Sorted(maps.Keys(gs.GitSyncConfig)) {
 		if k != "--git-config" && k != "--repo" && k != "--ref" && k != "--depth" &&
 			k != "--period" && k != "--link" && k != "--root" && k != "--one-time=true" &&
 			k != "--one-time=false" {
-			args = append(args, fmt.Sprintf("%s=%s", k, v))
+			args = append(args, fmt.Sprintf("%s=%s", k, gs.GitSyncConfig[k]))
 		}
 	}
 

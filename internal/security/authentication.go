@@ -6,8 +6,7 @@ import (
 	"slices"
 
 	authv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/authentication/v1alpha1"
-	"github.com/zncdatadev/operator-go/pkg/client"
-	"github.com/zncdatadev/operator-go/pkg/config/properties"
+	"github.com/zncdatadev/operator-go/pkg/constant"
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,29 +28,35 @@ const (
 	NifiAdminUsername = "admin"
 )
 
+// UserMountDir is where the admin credentials Secret is mounted.
+const UserMountDir = constant.KubedoopRoot + "users"
+
 var (
 	SupportedAuthTypes = []AuthenticatorType{AuthenticatorTypeLDAP, AuthenticatorTypeOIDC, AuthenticatorStatic}
 )
+
+// OidcAdminPasswordSecretName returns the name of the generated admin-password
+// Secret used by the OIDC single-user fallback login.
+func OidcAdminPasswordSecretName(clusterName string) string {
+	return clusterName + "-oidc-admin-password"
+}
 
 type Authentication struct {
 	Authenticators map[AuthenticatorType][]Authenticator
 }
 
-func GetAuthProvider(ctx context.Context, client *client.Client, authclass string) (*authv1alpha1.AuthenticationProvider, error) {
+func GetAuthProvider(ctx context.Context, c ctrlclient.Client, authclass string) (*authv1alpha1.AuthenticationProvider, error) {
 	obj := &authv1alpha1.AuthenticationClass{}
-	if err := client.Get(ctx, ctrlclient.ObjectKey{Name: authclass}, obj); err != nil {
-		if ctrlclient.IgnoreNotFound(err) != nil {
-			return nil, err
-		}
-		authLogger.Info("AuthenticationClass not found", "name", authclass)
+	if err := c.Get(ctx, ctrlclient.ObjectKey{Name: authclass}, obj); err != nil {
+		return nil, fmt.Errorf("getting AuthenticationClass %q: %w", authclass, err)
 	}
-	authLogger.Info("Found AuthenticationClass", "name", authclass)
+	authLogger.V(1).Info("Found AuthenticationClass", "name", authclass)
 	return obj.Spec.AuthenticationProvider, nil
 }
 
 func NewAuthentication(
 	ctx context.Context,
-	client *client.Client,
+	c ctrlclient.Client,
 	clusterName string,
 	auths []nifiv1alpha1.AuthenticationSpec,
 ) (*Authentication, error) {
@@ -65,12 +70,14 @@ func NewAuthentication(
 	if len(auths[0].AuthenticationClass) == 0 {
 		return nil, fmt.Errorf("authentication class is required")
 	}
-	authLogger.Info("Creating authentication", "authClass", auths[0].AuthenticationClass)
 
 	for _, auth := range auths {
-		provider, err := GetAuthProvider(ctx, client, auth.AuthenticationClass)
+		provider, err := GetAuthProvider(ctx, c, auth.AuthenticationClass)
 		if err != nil {
 			return nil, err
+		}
+		if provider == nil {
+			return nil, fmt.Errorf("AuthenticationClass %q has no provider", auth.AuthenticationClass)
 		}
 
 		if provider.OIDC != nil && slices.Contains(SupportedAuthTypes, AuthenticatorTypeOIDC) {
@@ -90,6 +97,11 @@ func NewAuthentication(
 	return &Authentication{
 		Authenticators: authenticators,
 	}, nil
+}
+
+// HasAuthenticator reports whether an authenticator of the given type is configured.
+func (a *Authentication) HasAuthenticator(t AuthenticatorType) bool {
+	return len(a.Authenticators[t]) > 0
 }
 
 func (a *Authentication) GetInitArgs() string {
@@ -128,7 +140,9 @@ func (a *Authentication) GetVolumeMounts() []corev1.VolumeMount {
 	return nil
 }
 
-func (a *Authentication) ExtendNifiProperties() *properties.Properties {
+// ExtendNifiProperties returns extra nifi.properties entries the authenticator
+// contributes (nil when none).
+func (a *Authentication) ExtendNifiProperties() map[string]string {
 	for _, typedAuthenticator := range a.Authenticators {
 		if len(typedAuthenticator) == 1 {
 			return typedAuthenticator[0].ExtendNifiProperties()
@@ -137,10 +151,10 @@ func (a *Authentication) ExtendNifiProperties() *properties.Properties {
 	return nil
 }
 
-func (a *Authentication) GetLoginIdentiryProvider() string {
+func (a *Authentication) GetLoginIdentityProvider() string {
 	for _, typedAuthenticator := range a.Authenticators {
 		if len(typedAuthenticator) > 0 {
-			return typedAuthenticator[0].GetLoginIdentiryProvider()
+			return typedAuthenticator[0].GetLoginIdentityProvider()
 		}
 	}
 	return ""
@@ -150,7 +164,7 @@ type Authenticator interface {
 	GetEnvVars() []corev1.EnvVar
 	GetVolumes() []corev1.Volume
 	GetVolumeMounts() []corev1.VolumeMount
-	ExtendNifiProperties() *properties.Properties
-	GetLoginIdentiryProvider() string
+	ExtendNifiProperties() map[string]string
+	GetLoginIdentityProvider() string
 	GetInitArgs() string
 }

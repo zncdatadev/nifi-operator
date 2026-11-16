@@ -1,15 +1,16 @@
 package security
 
 import (
+	"path"
 	"strings"
 
 	authv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/authentication/v1alpha1"
-	"github.com/zncdatadev/operator-go/pkg/config/properties"
-	"github.com/zncdatadev/operator-go/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/zncdatadev/nifi-operator/internal/util"
 )
 
-var _ Authenticator = &ldapAuthenticator{}
+var _ Authenticator = &staticAuthenticator{}
 
 type staticAuthenticator struct {
 	clusterName string
@@ -48,7 +49,8 @@ func (a *staticAuthenticator) GetVolumeMounts() []corev1.VolumeMount {
 
 	return volumeMounts
 }
-func (a *staticAuthenticator) ExtendNifiProperties() *properties.Properties {
+
+func (a *staticAuthenticator) ExtendNifiProperties() map[string]string {
 	return nil
 }
 
@@ -64,8 +66,12 @@ export NIFI_ADMIN_PASSWORD="$(python3 -c 'import bcrypt; print(bcrypt.hashpw(ope
 	return args
 }
 
-func (a *staticAuthenticator) GetLoginIdentiryProvider() string {
+func (a *staticAuthenticator) GetLoginIdentityProvider() string {
 	return getSingleUserLoginIdentityProvider()
+}
+
+func getAdminPasswordMountDir() string {
+	return path.Join(UserMountDir, NifiAdminUsername)
 }
 
 func getIdentityProvider(provider ...string) string {

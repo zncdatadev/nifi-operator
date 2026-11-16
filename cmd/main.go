@@ -27,6 +27,10 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	authv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/authentication/v1alpha1"
+	commonsv1alpha1 "github.com/zncdatadev/operator-go/pkg/apis/commons/v1alpha1"
+	"github.com/zncdatadev/operator-go/pkg/common"
+	"github.com/zncdatadev/operator-go/pkg/reconciler"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -40,6 +44,7 @@ import (
 
 	nifiv1alpha1 "github.com/zncdatadev/nifi-operator/api/v1alpha1"
 	"github.com/zncdatadev/nifi-operator/internal/controller"
+	"github.com/zncdatadev/nifi-operator/internal/extensions"
 	"github.com/zncdatadev/nifi-operator/internal/version"
 	// +kubebuilder:scaffold:imports
 )
@@ -215,10 +220,81 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.NifiClusterReconciler{
+	// The registry is instantiated for NifiCluster, so extensions declare the
+	// concrete CR type in their hooks; it is handed to exactly one reconciler.
+	extensionRegistry := common.NewExtensionRegistry[*nifiv1alpha1.NifiCluster]()
+	extensionRegistry.RegisterClusterExtension(extensions.NewSecurityExtension(mgr.GetScheme()))
+	extensionRegistry.RegisterClusterExtension(
+		extensions.NewReportingTaskExtension(mgr.GetScheme()),
+		common.WithPriority(common.PriorityLow),
+	)
+
+	roleGroupHandler := controller.NewNifiRoleGroupHandler(mgr.GetScheme())
+
+	reconcilerCfg := &reconciler.GenericReconcilerConfig[*nifiv1alpha1.NifiCluster]{
 		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+		// Uncached: refreshes the resourceVersion after a conflicting status
+		// write, which the informer cache is too stale to serve.
+		APIReader: mgr.GetAPIReader(),
+		Scheme:    mgr.GetScheme(),
+		//nolint:staticcheck // TODO: migrate to GetEventRecorder when the SDK supports the new events API
+		Recorder:         mgr.GetEventRecorderFor("nificluster-controller"),
+		RoleGroupHandler: roleGroupHandler,
+		// The "node" role's shape, declared once per pass with the cr in hand.
+		RoleProvider: roleGroupHandler,
+		// nifi.properties/bootstrap.conf flow through the SDK merge pipeline as
+		// the lowest layer; CRD configOverrides always win over them.
+		RoleGroupResolver: reconciler.RoleGroupResolverFunc[*nifiv1alpha1.NifiCluster](
+			roleGroupHandler.ResolveRoleGroup),
+		// Read every reconcile, so an operator upgrade moves existing clusters
+		// onto the co-released product image.
+		ImageResolution: reconciler.ImageResolution{
+			ProductName: nifiv1alpha1.DefaultProductName,
+			Defaults: commonsv1alpha1.ImageSpec{
+				Repo:            nifiv1alpha1.DefaultRepository,
+				ProductVersion:  nifiv1alpha1.DefaultProductVersion,
+				KubedoopVersion: version.BuildVersion,
+			},
+		},
+		// What NiFi PODS call: Kubernetes-native clustering needs leases
+		// (KubernetesLeaderElectionManager) and configmaps
+		// (KubernetesConfigMapStateProvider). The framework maintains the
+		// Role/RoleBinding bound to the derived workload ServiceAccount.
+		WorkloadRBACRules: func(cr *nifiv1alpha1.NifiCluster) []rbacv1.PolicyRule {
+			return []rbacv1.PolicyRule{
+				{
+					APIGroups: []string{"coordination.k8s.io"},
+					Resources: []string{"leases"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				},
+				{
+					APIGroups: []string{""},
+					Resources: []string{"configmaps"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				},
+			}
+		},
+		Prototype: &nifiv1alpha1.NifiCluster{},
+		// Fail fast with a Degraded condition when the referenced ZooKeeper
+		// discovery ConfigMap does not exist, instead of crash-looping pods.
+		Dependencies: func(cr *nifiv1alpha1.NifiCluster) []reconciler.Dependency {
+			cc := cr.Spec.ClusterConfig
+			if cc == nil || cc.ZookeeperConfigMapName == nil || *cc.ZookeeperConfigMapName == "" {
+				return nil
+			}
+			return []reconciler.Dependency{
+				{Kind: reconciler.DependencyConfigMap, Name: *cc.ZookeeperConfigMapName},
+			}
+		},
+		ExtensionRegistry: extensionRegistry,
+	}
+
+	nifiReconciler, err := reconciler.NewGenericReconciler(reconcilerCfg)
+	if err != nil {
+		setupLog.Error(err, "unable to create reconciler")
+		os.Exit(1)
+	}
+	if err := nifiReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "NifiCluster")
 		os.Exit(1)
 	}
